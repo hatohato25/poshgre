@@ -32,7 +32,12 @@ jobs:
           PATCH=$(echo "$VERSION" | cut -d. -f3)
 
           # 前回タグから HEAD までのコミットメッセージを取得
-          COMMITS=$(git log "${PREV_TAG}..HEAD" --format="%s")
+          # PREV_TAG が v0.0.0 = タグなしの場合は全コミットを対象にする
+          if [ "$PREV_TAG" = "v0.0.0" ]; then
+            COMMITS=$(git log HEAD --format="%s")
+          else
+            COMMITS=$(git log "${PREV_TAG}..HEAD" --format="%s")
+          fi
 
           # BREAKING CHANGE または '!:' を含む場合はメジャーバージョンアップ
           if echo "$COMMITS" | grep -qE '(BREAKING CHANGE|!:)'; then
@@ -59,7 +64,12 @@ jobs:
           NEXT_TAG="${{ steps.version.outputs.next_tag }}"
 
           # コミット一覧を取得（短縮ハッシュ + サブジェクト）
-          COMMITS=$(git log "${PREV_TAG}..HEAD" --format="%h %s")
+          # PREV_TAG が v0.0.0 = タグなしの場合は全コミットを対象にする
+          if [ "$PREV_TAG" = "v0.0.0" ]; then
+            COMMITS=$(git log HEAD --format="%h %s")
+          else
+            COMMITS=$(git log "${PREV_TAG}..HEAD" --format="%h %s")
+          fi
 
           FEATURES=""
           BUGFIXES=""
