@@ -4,8 +4,8 @@ use crate::error::Result;
 use crate::i18n::TuiMsg;
 use crate::t;
 
-use crate::query::is_write_sql;
 use super::{App, AppState, CompletionState, InputFocus, MAX_SQL_HISTORY};
+use crate::query::is_write_sql;
 
 impl App {
     /// イベント処理
@@ -15,7 +15,8 @@ impl App {
             // Connected状態では選択範囲コピー処理を優先するため handle_connected_input に委譲する
             if key_event.code == KeyCode::Char('c')
                 && key_event.modifiers.contains(KeyModifiers::CONTROL)
-                && !matches!(self.state, AppState::Connected { .. }) {
+                && !matches!(self.state, AppState::Connected { .. })
+            {
                 // abort() のみ呼び take() しない（run() 側で is_some() を確認して process::exit するため）
                 if let Some(ref task) = self.connecting_task {
                     task.abort();
@@ -47,7 +48,10 @@ impl App {
     }
 
     /// 接続済み状態のキー入力処理
-    pub(super) async fn handle_connected_input(&mut self, key_event: event::KeyEvent) -> Result<()> {
+    pub(super) async fn handle_connected_input(
+        &mut self,
+        key_event: event::KeyEvent,
+    ) -> Result<()> {
         // Shell フォーカス中は Shell 専用ハンドラに委譲する
         if self.input_focus == InputFocus::Shell {
             return self.handle_shell_input(key_event).await;
@@ -60,14 +64,14 @@ impl App {
 
         // 補完ポップアップ表示中は専用ハンドラに優先委譲する
         // 補完ハンドラが消費したキーは以降の処理に伝播させない
-        if self.sql.completion_state.is_some()
-            && self.handle_completion_key(key_event).await?
-        {
+        if self.sql.completion_state.is_some() && self.handle_completion_key(key_event).await? {
             return Ok(());
         }
 
         // APIキーが設定されているかを事前に判定する（フォーカス循環に使用）
-        let has_api_key = self.settings.anthropic_api_key
+        let has_api_key = self
+            .settings
+            .anthropic_api_key
             .as_ref()
             .map(|k| !k.as_str().is_empty())
             .unwrap_or(false);
@@ -126,7 +130,11 @@ impl App {
                         let _ = clipboard.set_text(selected_text);
                     }
                     // 選択範囲を削除してカーソルを選択開始位置に移動
-                    let cursor_start = self.sql.selection_start.unwrap_or(self.sql.cursor_position).min(self.sql.cursor_position);
+                    let cursor_start = self
+                        .sql
+                        .selection_start
+                        .unwrap_or(self.sql.cursor_position)
+                        .min(self.sql.cursor_position);
                     self.sql.text.replace_range(byte_start..byte_end, "");
                     self.sql.cursor_position = cursor_start;
                     self.sql.selection_start = None;
@@ -494,7 +502,10 @@ impl App {
     /// 補完ポップアップ表示中のキー処理
     ///
     /// キーを消費した場合 true を返す（呼び出し元がこれ以上処理しないよう通知）
-    pub(super) async fn handle_completion_key(&mut self, key_event: event::KeyEvent) -> Result<bool> {
+    pub(super) async fn handle_completion_key(
+        &mut self,
+        key_event: event::KeyEvent,
+    ) -> Result<bool> {
         match key_event.code {
             // Tab / ↓: 次の候補へ（ラップアラウンド）
             KeyCode::Tab | KeyCode::Down => {
@@ -502,8 +513,7 @@ impl App {
                     if state.candidates.is_empty() {
                         self.sql.completion_state = None;
                     } else {
-                        state.selected_index =
-                            (state.selected_index + 1) % state.candidates.len();
+                        state.selected_index = (state.selected_index + 1) % state.candidates.len();
                     }
                 }
                 return Ok(true);
@@ -563,7 +573,8 @@ impl App {
 
         // 既存トークンを削除して補完テキストを挿入する
         let completion_text = item.text.clone();
-        self.sql.text
+        self.sql
+            .text
             .replace_range(token_start_byte..cursor_byte, &completion_text);
         // 挿入後のカーソル位置 = トークン開始位置 + 挿入テキストのchar数
         let inserted_chars = completion_text.chars().count();
@@ -615,7 +626,9 @@ impl App {
         // schema.table パターン（qualified_db が Some）の場合は DatabaseTableName コンテキストに変換する。
         let context = if let Some(ref db_name) = qualified_db {
             // schema.table パターン: 指定スキーマのテーブル名コンテキストに変換する
-            crate::completion::SqlContext::DatabaseTableName { database: db_name.clone() }
+            crate::completion::SqlContext::DatabaseTableName {
+                database: db_name.clone(),
+            }
         } else {
             context
         };
@@ -648,12 +661,8 @@ impl App {
             let table_name = table_name.clone();
             if let AppState::Connected { ref manager } = self.state {
                 let pool = manager.pool().clone();
-                crate::completion::fetch_column_cache_if_needed(
-                    &cache_arc,
-                    &pool,
-                    &table_name,
-                )
-                .await;
+                crate::completion::fetch_column_cache_if_needed(&cache_arc, &pool, &table_name)
+                    .await;
             }
         }
 
@@ -668,7 +677,8 @@ impl App {
 
         // 既存ポップアップの選択位置を維持しつつ候補リストを更新する
         let selected_index = self
-            .sql.completion_state
+            .sql
+            .completion_state
             .as_ref()
             .map(|s| s.selected_index.min(candidates.len().saturating_sub(1)))
             .unwrap_or(0);
@@ -750,7 +760,8 @@ impl App {
     ///
     /// char_indices()でO(n)だが入力文字列は通常短いため許容範囲。
     pub(super) fn char_to_byte(&self, char_pos: usize) -> usize {
-        self.sql.text
+        self.sql
+            .text
             .char_indices()
             .nth(char_pos)
             .map(|(i, _)| i)
@@ -774,7 +785,11 @@ impl App {
     /// 呼び出し後はselection_startがNoneになる。
     pub(super) fn delete_selection(&mut self) {
         if let Some((byte_start, byte_end)) = self.selection_byte_range() {
-            let start = self.sql.selection_start.unwrap_or(self.sql.cursor_position).min(self.sql.cursor_position);
+            let start = self
+                .sql
+                .selection_start
+                .unwrap_or(self.sql.cursor_position)
+                .min(self.sql.cursor_position);
             self.sql.text.replace_range(byte_start..byte_end, "");
             self.sql.cursor_position = start;
             self.sql.selection_start = None;
@@ -841,7 +856,9 @@ impl App {
             // Tab: Shell → Prompt にフォーカスを進める（Sql → Shell → Prompt → Sql の循環）
             // APIキー未設定時は Prompt をスキップして Shell → Sql に進める
             KeyCode::Tab => {
-                let has_api_key = self.settings.anthropic_api_key
+                let has_api_key = self
+                    .settings
+                    .anthropic_api_key
                     .as_ref()
                     .map(|k| !k.as_str().is_empty())
                     .unwrap_or(false);
@@ -990,16 +1007,18 @@ impl App {
                 let api_key = match self.settings.anthropic_api_key.as_ref() {
                     Some(key) => key.as_str().to_string(),
                     None => {
-                        self.prompt.last_error = Some(
-                            "ANTHROPIC_API_KEY が設定されていません".to_string(),
-                        );
+                        self.prompt.last_error =
+                            Some("ANTHROPIC_API_KEY が設定されていません".to_string());
                         return Ok(());
                     }
                 };
 
                 // モデルは config.toml の settings.claude_model を優先する
                 // （Config::load() 内で環境変数 CLAUDE_MODEL へのフォールバック済み）
-                let model = self.settings.claude_model.clone()
+                let model = self
+                    .settings
+                    .claude_model
+                    .clone()
                     .unwrap_or_else(|| "claude-3-5-haiku-20241022".to_string());
 
                 self.prompt.is_processing = true;
@@ -1065,7 +1084,8 @@ impl App {
 
     /// prompt.text の char 位置をバイト位置に変換する
     pub(super) fn prompt_char_to_byte(&self, char_pos: usize) -> usize {
-        self.prompt.text
+        self.prompt
+            .text
             .char_indices()
             .nth(char_pos)
             .map(|(i, _)| i)
@@ -1092,7 +1112,8 @@ impl App {
     /// SQL 用の char_to_byte は query_input を参照するため、
     /// Shell 入力エリア専用の変換メソッドを用意する。
     pub(super) fn shell_char_to_byte(&self, char_pos: usize) -> usize {
-        self.shell.text
+        self.shell
+            .text
             .char_indices()
             .nth(char_pos)
             .map(|(i, _)| i)

@@ -1,4 +1,4 @@
-use poshgre::config::{ConnectionConfig, PostgresConfig, Password, PoolConfigPartial, SslMode};
+use poshgre::config::{ConnectionConfig, Password, PoolConfigPartial, PostgresConfig, SslMode};
 /// TUI状態遷移のテスト
 ///
 /// Phase 3.3: テストカバレッジ向上のための状態遷移テスト

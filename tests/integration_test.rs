@@ -1,6 +1,6 @@
 use poshgre::config::{
-    BastionConfig, BastionSetting, Config, ConnectionConfig, PostgresConfig, Password,
-    PoolConfigPartial, SslMode,
+    BastionConfig, BastionSetting, Config, ConnectionConfig, Password, PoolConfigPartial,
+    PostgresConfig, SslMode,
 };
 use poshgre::connection::ConnectionManager;
 use poshgre::query;

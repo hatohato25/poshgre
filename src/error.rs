@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::i18n::{ErrorMsg, get_lang};
+use crate::i18n::{get_lang, ErrorMsg};
 
 /// poshgreアプリケーションのエラー型
 ///
@@ -156,10 +156,7 @@ mod tests {
     #[test]
     fn test_error_display_config_load() {
         let err = Error::ConfigLoad("file not found".to_string());
-        assert_eq!(
-            err.to_string(),
-            "Failed to load config: file not found"
-        );
+        assert_eq!(err.to_string(), "Failed to load config: file not found");
     }
 
     #[test]

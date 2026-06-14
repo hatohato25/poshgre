@@ -1,5 +1,5 @@
-use sqlx::{Column, Executor, Pool, Postgres, Row as SqlxRow, TypeInfo, ValueRef};
 use sqlx::postgres::PgValueFormat;
+use sqlx::{Column, Executor, Pool, Postgres, Row as SqlxRow, TypeInfo, ValueRef};
 use std::time::{Duration, Instant};
 
 use crate::error::{Error, Result};
@@ -37,11 +37,10 @@ pub(crate) fn convert_value_to_string(
         // sqlx の TypeInfo::name() は大文字を返す（"INT4", "VARCHAR" 等）
         // ただし custom type は小文字になる場合があるため to_uppercase() で正規化する
         let raw = match type_name.to_uppercase().as_str() {
-            "INT2" | "SMALLINT" => {
-                row.try_get::<i16, _>(index)
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(|_| String::from("NULL"))
-            }
+            "INT2" | "SMALLINT" => row
+                .try_get::<i16, _>(index)
+                .map(|v| v.to_string())
+                .unwrap_or_else(|_| String::from("NULL")),
             "INT4" | "INT" | "INTEGER" | "SERIAL" => {
                 // SERIAL は INT4 として格納される
                 row.try_get::<i32, _>(index)
@@ -54,25 +53,22 @@ pub(crate) fn convert_value_to_string(
                     .map(|v| v.to_string())
                     .unwrap_or_else(|_| String::from("NULL"))
             }
-            "FLOAT4" | "REAL" => {
-                row.try_get::<f32, _>(index)
-                    .map(|v| format_numeric(v as f64))
-                    .unwrap_or_else(|_| String::from("NULL"))
-            }
-            "FLOAT8" | "DOUBLE PRECISION" => {
-                row.try_get::<f64, _>(index)
-                    .map(format_numeric)
-                    .unwrap_or_else(|_| String::from("NULL"))
-            }
+            "FLOAT4" | "REAL" => row
+                .try_get::<f32, _>(index)
+                .map(|v| format_numeric(v as f64))
+                .unwrap_or_else(|_| String::from("NULL")),
+            "FLOAT8" | "DOUBLE PRECISION" => row
+                .try_get::<f64, _>(index)
+                .map(format_numeric)
+                .unwrap_or_else(|_| String::from("NULL")),
             "NUMERIC" | "DECIMAL" => {
                 // sqlx の f64::Decode は FLOAT8 専用のため numeric に直接使えない。
                 // テキスト・バイナリ両プロトコルに対応した専用関数でデコードする。
                 decode_pg_numeric(row, index)
             }
-            "VARCHAR" | "BPCHAR" | "CHAR" | "TEXT" | "NAME" => {
-                row.try_get::<String, _>(index)
-                    .unwrap_or_else(|_| String::from("NULL"))
-            }
+            "VARCHAR" | "BPCHAR" | "CHAR" | "TEXT" | "NAME" => row
+                .try_get::<String, _>(index)
+                .unwrap_or_else(|_| String::from("NULL")),
             "DATE" => decode_pg_date(row, index),
             "TIMESTAMP" => decode_pg_timestamp(row, index),
             "TIMESTAMPTZ" => decode_pg_timestamptz(row, index),
@@ -81,14 +77,11 @@ pub(crate) fn convert_value_to_string(
                 row.try_get::<String, _>(index)
                     .unwrap_or_else(|_| String::from("NULL"))
             }
-            "BOOL" | "BOOLEAN" => {
-                row.try_get::<bool, _>(index)
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(|_| String::from("NULL"))
-            }
-            "BYTEA" => {
-                String::from("[BYTEA]")
-            }
+            "BOOL" | "BOOLEAN" => row
+                .try_get::<bool, _>(index)
+                .map(|v| v.to_string())
+                .unwrap_or_else(|_| String::from("NULL")),
+            "BYTEA" => String::from("[BYTEA]"),
             _ => {
                 // 未知の型は文字列として取得を試みる
                 row.try_get::<String, _>(index)
@@ -334,9 +327,8 @@ pub async fn execute_query(
     // PostgreSQLでは接続ごとにDBが固定されるため、USE先行実行は不要
     let mut stream: std::pin::Pin<
         Box<
-            dyn futures::Stream<
-                    Item = std::result::Result<sqlx::postgres::PgRow, sqlx::Error>,
-                > + Send,
+            dyn futures::Stream<Item = std::result::Result<sqlx::postgres::PgRow, sqlx::Error>>
+                + Send,
         >,
     > = Box::pin(sqlx::query(sql).fetch(pool));
 

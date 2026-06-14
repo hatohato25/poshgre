@@ -9,10 +9,9 @@ use crate::query::QueryResult;
 use crate::t;
 
 use super::{
-    App, AppState, ResultRowItem, SimpleSkimItem, SkimAction,
-    append_preview_to_chunk, build_preview_cmd, build_result_skim_options,
-    calculate_column_widths, cleanup_preview_dir, determine_skim_action,
-    flush_preview_chunk, format_row_display, preview_dir, read_row_from_chunk,
+    append_preview_to_chunk, build_preview_cmd, build_result_skim_options, calculate_column_widths,
+    cleanup_preview_dir, determine_skim_action, flush_preview_chunk, format_row_display,
+    preview_dir, read_row_from_chunk, App, AppState, ResultRowItem, SimpleSkimItem, SkimAction,
 };
 
 impl App {
@@ -113,7 +112,7 @@ impl App {
                     let rows = sqlx::query(
                         "SELECT tablename FROM pg_catalog.pg_tables \
                          WHERE schemaname = current_schema() \
-                         ORDER BY tablename"
+                         ORDER BY tablename",
                     )
                     .fetch_all(&pool_clone)
                     .await
@@ -143,8 +142,11 @@ impl App {
         // テーブル一覧取得完了後・skim起動直前にTUIを離脱してちらつきを防ぐ
         crossterm::terminal::disable_raw_mode()
             .map_err(|e| Error::Tui(format!("ターミナル復元失敗: {}", e)))?;
-        crossterm::execute!(terminal.backend_mut(), crossterm::terminal::LeaveAlternateScreen)
-            .map_err(|e| Error::Tui(format!("ターミナル復元失敗: {}", e)))?;
+        crossterm::execute!(
+            terminal.backend_mut(),
+            crossterm::terminal::LeaveAlternateScreen
+        )
+        .map_err(|e| Error::Tui(format!("ターミナル復元失敗: {}", e)))?;
 
         // Step 2: skimでテーブル選択（single select）
         let table_name = {
@@ -188,7 +190,7 @@ impl App {
                     use sqlx::Row;
                     let rows = sqlx::query(
                         "SELECT column_name FROM information_schema.columns \
-                         WHERE table_name = $1 ORDER BY ordinal_position"
+                         WHERE table_name = $1 ORDER BY ordinal_position",
                     )
                     .bind(&table_name_clone)
                     .fetch_all(&pool_clone)
@@ -334,8 +336,11 @@ impl App {
         // データ準備完了後・skim起動直前にTUIを離脱することでちらつきを防ぐ
         crossterm::terminal::disable_raw_mode()
             .map_err(|e| crate::error::Error::Tui(format!("ターミナル復元失敗: {}", e)))?;
-        crossterm::execute!(terminal.backend_mut(), crossterm::terminal::LeaveAlternateScreen)
-            .map_err(|e| crate::error::Error::Tui(format!("ターミナル復元失敗: {}", e)))?;
+        crossterm::execute!(
+            terminal.backend_mut(),
+            crossterm::terminal::LeaveAlternateScreen
+        )
+        .map_err(|e| crate::error::Error::Tui(format!("ターミナル復元失敗: {}", e)))?;
 
         let skim_output = Skim::run_with(&options, Some(rx));
 
@@ -379,7 +384,13 @@ impl App {
         }
 
         let first_column = result.columns.first().map(|s| s.as_str()).unwrap_or("");
-        let action = determine_skim_action(first_column, first_value, &result.columns, row_data, &self.sql.last_sql);
+        let action = determine_skim_action(
+            first_column,
+            first_value,
+            &result.columns,
+            row_data,
+            &self.sql.last_sql,
+        );
 
         Ok(Some(action))
     }
@@ -403,7 +414,8 @@ impl App {
         // バックグラウンドスレッドからカラム情報とカラム幅、または初期フェッチエラーを受け取るチャネル
         // 最初の100行をサンプリングしてカラム幅を決定してから送信する
         // エラー発生時はErrを送信し、skim起動前にエラーを検出できるようにする
-        let (col_tx, col_rx) = mpsc::channel::<std::result::Result<(Vec<String>, Vec<usize>), String>>();
+        let (col_tx, col_rx) =
+            mpsc::channel::<std::result::Result<(Vec<String>, Vec<usize>), String>>();
 
         // プレビュー用チャンクディレクトリ
         let pdir = preview_dir();
@@ -446,7 +458,8 @@ impl App {
                         Err(_elapsed) => {
                             // タイムアウト：サーバーからの応答が設定時間内に来なかった
                             let _ = col_tx.send(Err(
-                                "クエリのタイムアウト：サーバーからの応答がありませんでした".to_string()
+                                "クエリのタイムアウト：サーバーからの応答がありませんでした"
+                                    .to_string(),
                             ));
                             return Vec::new();
                         }
@@ -469,11 +482,7 @@ impl App {
                     };
 
                     if columns.is_empty() {
-                        columns = row
-                            .columns()
-                            .iter()
-                            .map(|c| c.name().to_string())
-                            .collect();
+                        columns = row.columns().iter().map(|c| c.name().to_string()).collect();
                     }
 
                     let data: Vec<String> = row
@@ -516,17 +525,14 @@ impl App {
                 for data in &sample_rows {
                     let display = format_row_display(data, &col_widths);
 
-                    let item = Arc::new(ResultRowItem { row_index, display })
-                        as Arc<dyn SkimItem>;
+                    let item = Arc::new(ResultRowItem { row_index, display }) as Arc<dyn SkimItem>;
                     if skim_tx.send(item).is_err() {
                         // skimが閉じたらチャンクファイルに書き出して終了する
                         flush_preview_chunk(&pdir_clone, row_index.saturating_sub(1), &chunk_buf);
                         return columns;
                     }
 
-                    append_preview_to_chunk(
-                        &pdir_clone, row_index, &columns, data, &mut chunk_buf,
-                    );
+                    append_preview_to_chunk(&pdir_clone, row_index, &columns, data, &mut chunk_buf);
 
                     row_index += 1;
                 }
@@ -551,8 +557,7 @@ impl App {
 
                     let display = format_row_display(&data, &col_widths);
 
-                    let item = Arc::new(ResultRowItem { row_index, display })
-                        as Arc<dyn SkimItem>;
+                    let item = Arc::new(ResultRowItem { row_index, display }) as Arc<dyn SkimItem>;
                     if skim_tx.send(item).is_err() {
                         tracing::debug!(
                             "skim channel closed, stopping stream at row {}",
@@ -562,7 +567,11 @@ impl App {
                     }
 
                     append_preview_to_chunk(
-                        &pdir_clone, row_index, &columns, &data, &mut chunk_buf,
+                        &pdir_clone,
+                        row_index,
+                        &columns,
+                        &data,
+                        &mut chunk_buf,
                     );
 
                     row_index += 1;
@@ -609,8 +618,11 @@ impl App {
         // LeaveAlternateScreen を skim 起動直前まで遅延させることで素のターミナルが見える時間をゼロにする
         crossterm::terminal::disable_raw_mode()
             .map_err(|e| crate::error::Error::Tui(format!("ターミナル復元失敗: {}", e)))?;
-        crossterm::execute!(terminal.backend_mut(), crossterm::terminal::LeaveAlternateScreen)
-            .map_err(|e| crate::error::Error::Tui(format!("ターミナル復元失敗: {}", e)))?;
+        crossterm::execute!(
+            terminal.backend_mut(),
+            crossterm::terminal::LeaveAlternateScreen
+        )
+        .map_err(|e| crate::error::Error::Tui(format!("ターミナル復元失敗: {}", e)))?;
 
         // skim_rxの送信側はバックグラウンドスレッドが保持しているため、skimが閉じると自動的にストリームが終了する
         let skim_output = Skim::run_with(&options, Some(skim_rx));
@@ -667,5 +679,4 @@ impl App {
 
         Ok(Some(action))
     }
-
 }

@@ -70,9 +70,11 @@ impl App {
                 connections,
                 selected_index,
             } => self.render_selecting(frame, size, connections, *selected_index),
-            AppState::Connecting { connection_name, spinner_frame, .. } => {
-                self.render_connecting(frame, size, connection_name, *spinner_frame)
-            }
+            AppState::Connecting {
+                connection_name,
+                spinner_frame,
+                ..
+            } => self.render_connecting(frame, size, connection_name, *spinner_frame),
             AppState::Connected { .. } => self.render_connected(frame, size),
             AppState::Executing { query } => self.render_executing(frame, size, query),
             // ストリーミング待ち中はExecutingと同じ表示
@@ -115,7 +117,11 @@ impl App {
 
                 let display = format!(
                     "{} - {}@{}:{}{}",
-                    conn.name, conn.postgres.user, conn.postgres.host, conn.postgres.port, bastion_info
+                    conn.name,
+                    conn.postgres.user,
+                    conn.postgres.host,
+                    conn.postgres.port,
+                    bastion_info
                 );
 
                 let style = if i == selected_index {
@@ -176,8 +182,7 @@ impl App {
 
         frame.render_widget(paragraph, chunks[0]);
 
-        let help = Paragraph::new("Ctrl+C: quit")
-            .style(Style::default().fg(Color::Gray));
+        let help = Paragraph::new("Ctrl+C: quit").style(Style::default().fg(Color::Gray));
         frame.render_widget(help, chunks[1]);
     }
 
@@ -185,7 +190,9 @@ impl App {
     pub(super) fn render_connected(&self, frame: &mut Frame, area: Rect) {
         // anthropic_api_key の有無でプロンプトエリアの表示を切り替える。
         // キーが未設定の場合はプロンプトエリアを非表示にし、そのスペースを情報パネルに割り当てる。
-        let has_api_key = self.settings.anthropic_api_key
+        let has_api_key = self
+            .settings
+            .anthropic_api_key
             .as_ref()
             .map(|k| !k.as_str().is_empty())
             .unwrap_or(false);
@@ -197,12 +204,12 @@ impl App {
             let c = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Length(2),  // [0] パンくずリスト
-                    Constraint::Length(5),  // [1] SQL入力エリア
-                    Constraint::Length(5),  // [2] Shell入力エリア
-                    Constraint::Length(5),  // [3] PROMPT 入力エリア
-                    Constraint::Min(3),     // [4] 接続情報・選択レコードプレビュー
-                    Constraint::Length(3),  // [5] ヘルプ
+                    Constraint::Length(2), // [0] パンくずリスト
+                    Constraint::Length(5), // [1] SQL入力エリア
+                    Constraint::Length(5), // [2] Shell入力エリア
+                    Constraint::Length(5), // [3] PROMPT 入力エリア
+                    Constraint::Min(3),    // [4] 接続情報・選択レコードプレビュー
+                    Constraint::Length(3), // [5] ヘルプ
                 ])
                 .split(area);
             (c, Some(3usize), 4usize, 5usize)
@@ -210,11 +217,11 @@ impl App {
             let c = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Length(2),  // [0] パンくずリスト
-                    Constraint::Length(5),  // [1] SQL入力エリア
-                    Constraint::Length(5),  // [2] Shell入力エリア
-                    Constraint::Min(3),     // [3] 接続情報・選択レコードプレビュー
-                    Constraint::Length(3),  // [4] ヘルプ
+                    Constraint::Length(2), // [0] パンくずリスト
+                    Constraint::Length(5), // [1] SQL入力エリア
+                    Constraint::Length(5), // [2] Shell入力エリア
+                    Constraint::Min(3),    // [3] 接続情報・選択レコードプレビュー
+                    Constraint::Length(3), // [4] ヘルプ
                 ])
                 .split(area);
             (c, None, 3usize, 4usize)
@@ -257,14 +264,12 @@ impl App {
         } else {
             Style::default()
         };
-        let input_paragraph = Paragraph::new(input_text)
-            .wrap(Wrap { trim: false })
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(input_title)
-                    .border_style(sql_border_style),
-            );
+        let input_paragraph = Paragraph::new(input_text).wrap(Wrap { trim: false }).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(input_title)
+                .border_style(sql_border_style),
+        );
 
         frame.render_widget(input_paragraph, chunks[1]);
 
@@ -279,19 +284,23 @@ impl App {
         };
         // Shell入力も \n 分割で複数行描画に対応する（選択範囲なし）
         let shell_text = build_multiline_text(&self.shell.text, None, self.shell.cursor_position);
-        let shell_paragraph = Paragraph::new(shell_text)
-            .wrap(Wrap { trim: false })
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(shell_title)
-                    .border_style(shell_border_style),
-            );
+        let shell_paragraph = Paragraph::new(shell_text).wrap(Wrap { trim: false }).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(shell_title)
+                .border_style(shell_border_style),
+        );
         frame.render_widget(shell_paragraph, chunks[2]);
 
         // PROMPT 入力エリアを描画する（APIキーが設定されている場合のみ）
         if let Some(prompt_idx) = prompt_chunk_idx {
-            render_prompt_area(frame, chunks[prompt_idx], &self.prompt, self.input_focus, has_api_key);
+            render_prompt_area(
+                frame,
+                chunks[prompt_idx],
+                &self.prompt,
+                self.input_focus,
+                has_api_key,
+            );
         }
 
         // カーソルを表示（フォーカスに応じて SQL / Shell / Prompt 入力エリアに描画）
@@ -324,8 +333,11 @@ impl App {
             InputFocus::Prompt => {
                 // PROMPT エリア内のカーソル位置を計算する（APIキーなし時はフォーカスが来ないが念のため処理する）
                 if let Some(prompt_idx) = prompt_chunk_idx {
-                    let prompt_inner_width = chunks[prompt_idx].width.saturating_sub(2).max(1) as usize;
-                    let display_width: usize = self.prompt.text
+                    let prompt_inner_width =
+                        chunks[prompt_idx].width.saturating_sub(2).max(1) as usize;
+                    let display_width: usize = self
+                        .prompt
+                        .text
                         .chars()
                         .take(self.prompt.cursor_position)
                         .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(1))
@@ -346,8 +358,8 @@ impl App {
             _ => {
                 let empty = Paragraph::new("");
                 frame.render_widget(empty, chunks[info_chunk_idx]);
-                let help = Paragraph::new(t!(TuiMsg::QueryHelp))
-                    .style(Style::default().fg(Color::Gray));
+                let help =
+                    Paragraph::new(t!(TuiMsg::QueryHelp)).style(Style::default().fg(Color::Gray));
                 frame.render_widget(help, chunks[help_chunk_idx]);
                 return;
             }
@@ -392,7 +404,11 @@ impl App {
             info_lines.push_str(&format!("\n\n{}", t!(TuiMsg::SqlInputHint)));
 
             let info_paragraph = Paragraph::new(info_lines)
-                .block(Block::default().borders(Borders::ALL).title(t!(TuiMsg::ConnectionInfo)))
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(t!(TuiMsg::ConnectionInfo)),
+                )
                 .style(Style::default().fg(Color::Cyan));
 
             frame.render_widget(info_paragraph, chunks[info_chunk_idx]);
@@ -433,9 +449,9 @@ impl App {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(2),  // パンくずリスト
-                Constraint::Length(5),  // クエリ表示
-                Constraint::Min(3),     // ステータス
+                Constraint::Length(2), // パンくずリスト
+                Constraint::Length(5), // クエリ表示
+                Constraint::Min(3),    // ステータス
             ])
             .split(area);
 
@@ -457,7 +473,11 @@ impl App {
         // 実行中表示
         let text = Text::from(t!(TuiMsg::ExecutingMessage));
         let paragraph = Paragraph::new(text)
-            .block(Block::default().borders(Borders::ALL).title(t!(TuiMsg::StatusTitle)))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(t!(TuiMsg::StatusTitle)),
+            )
             .style(Style::default().fg(Color::Yellow));
 
         frame.render_widget(paragraph, chunks[2]);
@@ -468,9 +488,9 @@ impl App {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(2),  // パンくずリスト
-                Constraint::Min(5),     // エラーメッセージ
-                Constraint::Length(3),  // ヘルプ
+                Constraint::Length(2), // パンくずリスト
+                Constraint::Min(5),    // エラーメッセージ
+                Constraint::Length(3), // ヘルプ
             ])
             .split(area);
 
@@ -687,7 +707,8 @@ pub(super) fn render_prompt_area(
         format!(" Error: {} ", err)
     } else if prompt.is_processing {
         // loading_tick をフレーム数で剰余してスピナー文字を選択する
-        let spinner_char = SPINNER_FRAMES_LOADING[prompt.loading_tick as usize % SPINNER_FRAMES_LOADING.len()];
+        let spinner_char =
+            SPINNER_FRAMES_LOADING[prompt.loading_tick as usize % SPINNER_FRAMES_LOADING.len()];
         // スピナー文字とベースメッセージを組み合わせてアニメーションタイトルを生成する
         format!(" {} {} ", spinner_char, t!(TuiMsg::PromptProcessingBase))
     } else if is_focused {
@@ -703,15 +724,16 @@ pub(super) fn render_prompt_area(
     };
 
     // 本文は常に入力テキストを使う（エラー表示中も入力が見えるようにする）
-    let (content, content_style) = if prompt.text.is_empty() && !has_api_key && prompt.last_error.is_none() {
-        // APIキー未設定かつ未入力のときのみプレースホルダーを表示する
-        (
-            "Set ANTHROPIC_API_KEY env var to use AI prompt",
-            Style::default().fg(Color::DarkGray),
-        )
-    } else {
-        (prompt.text.as_str(), Style::default())
-    };
+    let (content, content_style) =
+        if prompt.text.is_empty() && !has_api_key && prompt.last_error.is_none() {
+            // APIキー未設定かつ未入力のときのみプレースホルダーを表示する
+            (
+                "Set ANTHROPIC_API_KEY env var to use AI prompt",
+                Style::default().fg(Color::DarkGray),
+            )
+        } else {
+            (prompt.text.as_str(), Style::default())
+        };
 
     let paragraph = Paragraph::new(content)
         .wrap(Wrap { trim: false })
@@ -727,7 +749,11 @@ pub(super) fn render_prompt_area(
 }
 
 /// 補完ポップアップを描画する
-pub(super) fn render_completion_popup(frame: &mut Frame, popup_rect: Rect, state: &CompletionState) {
+pub(super) fn render_completion_popup(
+    frame: &mut Frame,
+    popup_rect: Rect,
+    state: &CompletionState,
+) {
     frame.render_widget(Clear, popup_rect);
 
     let items: Vec<ListItem> = state

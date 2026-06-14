@@ -127,9 +127,24 @@ pub const SQL_KEYWORDS: &[&str] = &[
 pub fn is_completion_separator(c: char) -> bool {
     matches!(
         c,
-        ' ' | '\t' | ',' | ';' | '.' | '(' | ')' | '[' | ']'
-            | '=' | '<' | '>' | '!' | '+' | '-' | '*' | '/'
-            | '\'' | '"'
+        ' ' | '\t'
+            | ','
+            | ';'
+            | '.'
+            | '('
+            | ')'
+            | '['
+            | ']'
+            | '='
+            | '<'
+            | '>'
+            | '!'
+            | '+'
+            | '-'
+            | '*'
+            | '/'
+            | '\''
+            | '"'
     )
 }
 
@@ -388,7 +403,9 @@ pub async fn fetch_column_cache_if_needed(
             .map(|row| row.try_get::<String, _>(0).unwrap_or_default())
             .collect();
         let mut cache_write = cache.write().await;
-        cache_write.columns.insert(table_name.to_lowercase(), columns);
+        cache_write
+            .columns
+            .insert(table_name.to_lowercase(), columns);
     }
 }
 
@@ -484,10 +501,7 @@ mod tests {
     fn test_analyze_context_select_before_from() {
         // SELECT〜FROMの間はカラム名文脈
         let context = analyze_context("SELECT ");
-        assert_eq!(
-            context,
-            SqlContext::ColumnName { table: None }
-        );
+        assert_eq!(context, SqlContext::ColumnName { table: None });
     }
 
     // current_token_with_pos のテスト
@@ -609,11 +623,23 @@ mod tests {
         assert_eq!(candidates.len(), SQL_KEYWORDS.len());
         // PostgreSQL固有キーワードが含まれることを確認
         let texts: Vec<&str> = candidates.iter().map(|c| c.text.as_str()).collect();
-        assert!(texts.contains(&"RETURNING"), "PostgreSQL固有のRETURNINGが含まれるべき");
-        assert!(texts.contains(&"ILIKE"), "PostgreSQL固有のILIKEが含まれるべき");
+        assert!(
+            texts.contains(&"RETURNING"),
+            "PostgreSQL固有のRETURNINGが含まれるべき"
+        );
+        assert!(
+            texts.contains(&"ILIKE"),
+            "PostgreSQL固有のILIKEが含まれるべき"
+        );
         // PostgreSQLでは不要なMySQL固有キーワードが含まれないことを確認
-        assert!(!texts.contains(&"SHOW TABLES"), "PostgreSQLでは不要なSHOW TABLESは含まれるべきでない");
-        assert!(!texts.contains(&"DESCRIBE"), "PostgreSQLでは不要なDESCRIBEは含まれるべきでない");
+        assert!(
+            !texts.contains(&"SHOW TABLES"),
+            "PostgreSQLでは不要なSHOW TABLESは含まれるべきでない"
+        );
+        assert!(
+            !texts.contains(&"DESCRIBE"),
+            "PostgreSQLでは不要なDESCRIBEは含まれるべきでない"
+        );
     }
 
     #[test]

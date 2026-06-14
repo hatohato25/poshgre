@@ -121,12 +121,14 @@ pub async fn run_agent(
             .map_err(|e| Error::ClaudeApi(format!("レスポンスの解析に失敗しました: {}", e)))?;
 
         // レスポンスの content 配列を処理する
-        let content = response_json["content"]
-            .as_array()
-            .ok_or_else(|| Error::ClaudeApi("レスポンスに content フィールドがありません".to_string()))?;
+        let content = response_json["content"].as_array().ok_or_else(|| {
+            Error::ClaudeApi("レスポンスに content フィールドがありません".to_string())
+        })?;
 
         // tool_use ブロックが含まれるか確認する
-        let has_tool_use = content.iter().any(|b| b["type"].as_str() == Some("tool_use"));
+        let has_tool_use = content
+            .iter()
+            .any(|b| b["type"].as_str() == Some("tool_use"));
 
         if has_tool_use {
             // tool_use ブロックを収集してクエリを実行し、次のターンの messages に追加する
@@ -324,6 +326,8 @@ mod tests {
         assert!(is_write_sql("DELETE FROM t"));
         assert!(is_write_sql("DROP TABLE t"));
         assert!(!is_write_sql("SELECT * FROM t"));
-        assert!(!is_write_sql("SELECT schema_name FROM information_schema.schemata"));
+        assert!(!is_write_sql(
+            "SELECT schema_name FROM information_schema.schemata"
+        ));
     }
 }

@@ -23,7 +23,10 @@ impl std::str::FromStr for Lang {
         match s {
             "en" => Ok(Lang::En),
             "ja" => Ok(Lang::Ja),
-            other => Err(format!("Unsupported language: '{}'. Supported: en, ja", other)),
+            other => Err(format!(
+                "Unsupported language: '{}'. Supported: en, ja",
+                other
+            )),
         }
     }
 }
@@ -190,7 +193,10 @@ impl<'a> ErrorMsg<'a> {
             ErrorMsg::Config { detail } => format!("Config error: {}", detail),
             ErrorMsg::ConfigLoad { detail } => format!("Failed to load config: {}", detail),
             ErrorMsg::ConfigPermission { path } => {
-                format!("Invalid config file permission (recommended: 600): {}", path)
+                format!(
+                    "Invalid config file permission (recommended: 600): {}",
+                    path
+                )
             }
             ErrorMsg::Connection { detail } => format!("Connection error: {}", detail),
             ErrorMsg::DatabaseConnection { detail } => {
@@ -268,7 +274,9 @@ pub enum TuiMsg<'a> {
     QueryHelp,
     // 接続中
     ConnectingTitle,
-    ConnectingMessage { connection_name: &'a str },
+    ConnectingMessage {
+        connection_name: &'a str,
+    },
     // クエリ実行中
     ExecutingQueryTitle,
     StatusTitle,
@@ -285,8 +293,12 @@ pub enum TuiMsg<'a> {
     // selector.rs 関連
     SelectConnectionPrompt,
     // カラム選択関連
-    ColumnSelectPrompt { table: &'a str },
-    NoColumnsFound { table: &'a str },
+    ColumnSelectPrompt {
+        table: &'a str,
+    },
+    NoColumnsFound {
+        table: &'a str,
+    },
     // Shell入力エリア
     ShellInputTitleFocused,
     // PROMPT入力エリア（Claude AI連携）
@@ -297,9 +309,15 @@ pub enum TuiMsg<'a> {
     PromptProcessingBase,
     PromptApiKeyNotSet,
     // 動的メッセージ（引数付き）
-    QueryFailed { detail: &'a str },
-    QueryCancelled { query: &'a str },
-    QueryTaskFailed { detail: &'a str },
+    QueryFailed {
+        detail: &'a str,
+    },
+    QueryCancelled {
+        query: &'a str,
+    },
+    QueryTaskFailed {
+        detail: &'a str,
+    },
     ReadonlyBlocked,
 }
 
@@ -453,7 +471,10 @@ pub enum ConnectionMsg<'a> {
     /// 接続失敗（原因不明）
     ConnectionFailed,
     /// SSH鍵/agentの両認証失敗
-    SshAuthFailed { key_err: &'a str, agent_err: &'a str },
+    SshAuthFailed {
+        key_err: &'a str,
+        agent_err: &'a str,
+    },
     /// SSH agent認証失敗
     SshAgentAuthFailed { detail: &'a str },
     /// SSH認証エラー（一般）
@@ -555,7 +576,9 @@ mod tests {
     // ConfigMsg テスト
     #[test]
     fn test_config_msg_not_found_en() {
-        let msg = ConfigMsg::NotFound { path: "/path/to/config.toml" };
+        let msg = ConfigMsg::NotFound {
+            path: "/path/to/config.toml",
+        };
         let text = msg.translate(Lang::En);
         assert!(text.contains("Config file not found"));
         assert!(text.contains("/path/to/config.toml"));
@@ -563,7 +586,9 @@ mod tests {
 
     #[test]
     fn test_config_msg_not_found_ja() {
-        let msg = ConfigMsg::NotFound { path: "/path/to/config.toml" };
+        let msg = ConfigMsg::NotFound {
+            path: "/path/to/config.toml",
+        };
         let text = msg.translate(Lang::Ja);
         assert!(text.contains("設定ファイルが見つかりません"));
         assert!(text.contains("/path/to/config.toml"));
@@ -571,7 +596,9 @@ mod tests {
 
     #[test]
     fn test_config_msg_parse_failed_en() {
-        let msg = ConfigMsg::ParseFailed { detail: "invalid toml" };
+        let msg = ConfigMsg::ParseFailed {
+            detail: "invalid toml",
+        };
         let text = msg.translate(Lang::En);
         assert!(text.contains("Failed to parse config file"));
         assert!(text.contains("invalid toml"));
@@ -579,7 +606,9 @@ mod tests {
 
     #[test]
     fn test_config_msg_parse_failed_ja() {
-        let msg = ConfigMsg::ParseFailed { detail: "invalid toml" };
+        let msg = ConfigMsg::ParseFailed {
+            detail: "invalid toml",
+        };
         let text = msg.translate(Lang::Ja);
         assert!(text.contains("設定ファイルの解析に失敗しました"));
     }
@@ -630,7 +659,10 @@ mod tests {
 
     #[test]
     fn test_config_msg_permission_warning_en() {
-        let msg = ConfigMsg::PermissionWarning { mode: 0o644, path: "/path/config.toml" };
+        let msg = ConfigMsg::PermissionWarning {
+            mode: 0o644,
+            path: "/path/config.toml",
+        };
         let text = msg.translate(Lang::En);
         assert!(text.contains("644"));
         assert!(text.contains("chmod 600"));
@@ -639,7 +671,10 @@ mod tests {
 
     #[test]
     fn test_config_msg_permission_warning_ja() {
-        let msg = ConfigMsg::PermissionWarning { mode: 0o644, path: "/path/config.toml" };
+        let msg = ConfigMsg::PermissionWarning {
+            mode: 0o644,
+            path: "/path/config.toml",
+        };
         let text = msg.translate(Lang::Ja);
         assert!(text.contains("644"));
         assert!(text.contains("chmod 600"));
@@ -667,7 +702,10 @@ mod tests {
     #[test]
     fn test_error_msg_query_timeout_ja() {
         let msg = ErrorMsg::QueryTimeout;
-        assert_eq!(msg.translate(Lang::Ja), "クエリの実行がタイムアウトしました");
+        assert_eq!(
+            msg.translate(Lang::Ja),
+            "クエリの実行がタイムアウトしました"
+        );
     }
 
     // TuiMsg テスト
@@ -699,7 +737,9 @@ mod tests {
 
     #[test]
     fn test_tui_msg_query_failed_en() {
-        let msg = TuiMsg::QueryFailed { detail: "syntax error" };
+        let msg = TuiMsg::QueryFailed {
+            detail: "syntax error",
+        };
         let text = msg.translate(Lang::En);
         assert!(text.contains("Query execution failed"));
         assert!(text.contains("syntax error"));
@@ -707,7 +747,9 @@ mod tests {
 
     #[test]
     fn test_tui_msg_query_failed_ja() {
-        let msg = TuiMsg::QueryFailed { detail: "syntax error" };
+        let msg = TuiMsg::QueryFailed {
+            detail: "syntax error",
+        };
         let text = msg.translate(Lang::Ja);
         assert!(text.contains("クエリ実行に失敗しました"));
         assert!(text.contains("syntax error"));
@@ -730,7 +772,9 @@ mod tests {
     // ConnectionMsg テスト
     #[test]
     fn test_connection_msg_readonly_set_failed_en() {
-        let msg = ConnectionMsg::ReadonlySetFailed { detail: "permission denied" };
+        let msg = ConnectionMsg::ReadonlySetFailed {
+            detail: "permission denied",
+        };
         let text = msg.translate(Lang::En);
         assert!(text.contains("Failed to set readonly mode"));
         assert!(text.contains("permission denied"));
@@ -738,7 +782,9 @@ mod tests {
 
     #[test]
     fn test_connection_msg_readonly_set_failed_ja() {
-        let msg = ConnectionMsg::ReadonlySetFailed { detail: "permission denied" };
+        let msg = ConnectionMsg::ReadonlySetFailed {
+            detail: "permission denied",
+        };
         let text = msg.translate(Lang::Ja);
         assert!(text.contains("readonlyモード設定に失敗"));
     }

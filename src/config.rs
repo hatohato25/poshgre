@@ -316,9 +316,15 @@ impl Config {
                 // PoolConfigPartialのフィールド単位マージにより、一部フィールドだけdefault_postgres_poolから取る設定が可能
                 let mut postgres = conn.postgres.clone();
                 postgres.pool = PoolConfigPartial {
-                    max_connections: conn.postgres.pool.max_connections
+                    max_connections: conn
+                        .postgres
+                        .pool
+                        .max_connections
                         .or_else(|| default_pool.and_then(|d| d.max_connections)),
-                    idle_timeout: conn.postgres.pool.idle_timeout
+                    idle_timeout: conn
+                        .postgres
+                        .pool
+                        .idle_timeout
                         .or_else(|| default_pool.and_then(|d| d.idle_timeout)),
                 };
 
@@ -356,7 +362,9 @@ impl Config {
 /// 文字列が空でないことを検証
 fn validate_not_empty(value: &str, field_name: &str) -> Result<()> {
     if value.is_empty() {
-        return Err(Error::config(t!(ConfigMsg::FieldEmpty { field: field_name })));
+        return Err(Error::config(t!(ConfigMsg::FieldEmpty {
+            field: field_name
+        })));
     }
     Ok(())
 }
@@ -364,7 +372,9 @@ fn validate_not_empty(value: &str, field_name: &str) -> Result<()> {
 /// ポート番号が0でないことを検証
 fn validate_port(port: u16, field_name: &str) -> Result<()> {
     if port == 0 {
-        return Err(Error::config(t!(ConfigMsg::InvalidPort { field: field_name })));
+        return Err(Error::config(t!(ConfigMsg::InvalidPort {
+            field: field_name
+        })));
     }
     Ok(())
 }
@@ -800,7 +810,10 @@ idle_timeout = 600
 
         let config = Config::load(temp_file.path().to_str().unwrap()).unwrap();
         // PoolConfigPartialはOption型なので、設定された値はSomeとして保持される
-        assert_eq!(config.connections[0].postgres.pool.max_connections, Some(20));
+        assert_eq!(
+            config.connections[0].postgres.pool.max_connections,
+            Some(20)
+        );
         assert_eq!(config.connections[0].postgres.pool.idle_timeout, Some(600));
     }
 
@@ -1064,7 +1077,10 @@ password = "password"
         set_test_file_permissions_600(temp_file.path());
 
         let config = Config::load(temp_file.path().to_str().unwrap()).unwrap();
-        assert!(!config.connections[0].readonly, "readonlyフィールド省略時はfalseになるべき");
+        assert!(
+            !config.connections[0].readonly,
+            "readonlyフィールド省略時はfalseになるべき"
+        );
     }
 
     #[test]
@@ -1090,7 +1106,10 @@ password = "password"
         set_test_file_permissions_600(temp_file.path());
 
         let config = Config::load(temp_file.path().to_str().unwrap()).unwrap();
-        assert!(config.connections[0].readonly, "readonlyフィールドtrueはtrueになるべき");
+        assert!(
+            config.connections[0].readonly,
+            "readonlyフィールドtrueはtrueになるべき"
+        );
     }
 
     #[test]
@@ -1125,8 +1144,14 @@ password = "testpass"
         let resolved = config.resolve_connections();
 
         // bastion = true + default_bastion 適用後もreadonlyが維持される
-        assert!(resolved[0].readonly, "resolve_connections後もreadonly=trueが維持されるべき");
-        assert!(resolved[0].bastion.is_some(), "bastion=trueでデフォルトbastionが適用されるべき");
+        assert!(
+            resolved[0].readonly,
+            "resolve_connections後もreadonly=trueが維持されるべき"
+        );
+        assert!(
+            resolved[0].bastion.is_some(),
+            "bastion=trueでデフォルトbastionが適用されるべき"
+        );
     }
 
     #[test]
@@ -1166,7 +1191,10 @@ password = "password"
 
         // get_bastion()でNoneが返ること（直接接続）
         let bastion = config.connections[0].get_bastion(&config.default_bastion);
-        assert!(bastion.is_none(), "bastion = false のとき direct 接続になるべき");
+        assert!(
+            bastion.is_none(),
+            "bastion = false のとき direct 接続になるべき"
+        );
 
         // resolve_connections()でもbastionはNoneになること
         let resolved = config.resolve_connections();

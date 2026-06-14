@@ -100,7 +100,9 @@ pub fn select_connection(connections: &[ConnectionConfig]) -> Result<ConnectionC
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{BastionConfig, BastionSetting, PostgresConfig, Password, PoolConfigPartial, SslMode};
+    use crate::config::{
+        BastionConfig, BastionSetting, Password, PoolConfigPartial, PostgresConfig, SslMode,
+    };
 
     fn create_test_connection(name: &str) -> ConnectionConfig {
         ConnectionConfig {

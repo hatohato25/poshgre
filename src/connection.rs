@@ -69,39 +69,45 @@ impl ConnectionManager {
         // bastion経由接続の判定
         // resolve_connections()適用後のConfigではbastionはConfig(BastionConfig)かNoneのみ。
         // Toggleは生のConfigではありうるが、connect()はresolve後のConfigを受け取ることを想定する。
-        let (tunnel, postgres_host, postgres_port) = if let Some(BastionSetting::Config(ref bastion_cfg)) = config.bastion {
-            tracing::info!(
-                "Setting up SSH tunnel via bastion: {}@{}:{}",
-                bastion_cfg.user,
-                bastion_cfg.host,
-                bastion_cfg.port
-            );
+        let (tunnel, postgres_host, postgres_port) =
+            if let Some(BastionSetting::Config(ref bastion_cfg)) = config.bastion {
+                tracing::info!(
+                    "Setting up SSH tunnel via bastion: {}@{}:{}",
+                    bastion_cfg.user,
+                    bastion_cfg.host,
+                    bastion_cfg.port
+                );
 
-            // SSH tunnel確立（同期処理をspawn_blockingで実行）
-            let bastion_cfg = bastion_cfg.clone();
-            let postgres_host_for_tunnel = config.postgres.host.clone();
-            let postgres_port = config.postgres.port;
-            let ssh_timeout = Duration::from_secs(config.postgres.timeout);
+                // SSH tunnel確立（同期処理をspawn_blockingで実行）
+                let bastion_cfg = bastion_cfg.clone();
+                let postgres_host_for_tunnel = config.postgres.host.clone();
+                let postgres_port = config.postgres.port;
+                let ssh_timeout = Duration::from_secs(config.postgres.timeout);
 
-            let tunnel = tokio::task::spawn_blocking(move || {
-                establish_ssh_tunnel(&bastion_cfg, &postgres_host_for_tunnel, postgres_port, ssh_timeout)
-            })
-            .await
-            .map_err(|e| Error::connection_context("SSH tunnel task", e))??;
+                let tunnel = tokio::task::spawn_blocking(move || {
+                    establish_ssh_tunnel(
+                        &bastion_cfg,
+                        &postgres_host_for_tunnel,
+                        postgres_port,
+                        ssh_timeout,
+                    )
+                })
+                .await
+                .map_err(|e| Error::connection_context("SSH tunnel task", e))??;
 
-            let local_port = tunnel.local_port;
-            tracing::info!(
-                "SSH tunnel established: localhost:{} -> {}:{}",
-                local_port,
-                config.postgres.host,
-                postgres_port
-            );
+                let local_port = tunnel.local_port;
+                tracing::info!(
+                    "SSH tunnel established: localhost:{} -> {}:{}",
+                    local_port,
+                    config.postgres.host,
+                    postgres_port
+                );
 
-            (Some(tunnel), LOCALHOST.to_string(), local_port)
-        } else {
-            tracing::info!("Direct connection (no bastion)");
-            (None, config.postgres.host.clone(), config.postgres.port)
-        };
+                (Some(tunnel), LOCALHOST.to_string(), local_port)
+            } else {
+                tracing::info!("Direct connection (no bastion)");
+                (None, config.postgres.host.clone(), config.postgres.port)
+            };
 
         // SSL/TLS設定を決定（PostgreSQLのPgSslModeに変換）
         let ssl_mode = match config.postgres.ssl_mode {
@@ -215,9 +221,7 @@ impl ConnectionManager {
         }
 
         // すべてのリトライが失敗した場合
-        Err(last_error.unwrap_or_else(|| {
-            Error::Connection(t!(ConnectionMsg::ConnectionFailed))
-        }))
+        Err(last_error.unwrap_or_else(|| Error::Connection(t!(ConnectionMsg::ConnectionFailed))))
     }
 
     /// エラーがタイムアウトエラーかどうかを判定
@@ -238,7 +242,9 @@ impl ConnectionManager {
             // SSH接続・DNS解決タイムアウトはError::Connectionとして上がるためリトライ対象外にする
             Error::Connection(msg) => {
                 let lower = msg.to_lowercase();
-                lower.contains("timeout") || lower.contains("timed out") || lower.contains("タイムアウト")
+                lower.contains("timeout")
+                    || lower.contains("timed out")
+                    || lower.contains("タイムアウト")
             }
             _ => false,
         }
@@ -311,11 +317,12 @@ fn establish_ssh_tunnel(
             .and_then(|mut it| it.next());
         let _ = tx.send(result);
     });
-    let addr = rx
-        .recv_timeout(timeout)
-        .ok()
-        .flatten()
-        .ok_or_else(|| Error::connection_context("bastionアドレスの解決", "タイムアウトまたはアドレスが見つかりません"))?;
+    let addr = rx.recv_timeout(timeout).ok().flatten().ok_or_else(|| {
+        Error::connection_context(
+            "bastionアドレスの解決",
+            "タイムアウトまたはアドレスが見つかりません",
+        )
+    })?;
     let tcp_stream = TcpStream::connect_timeout(&addr, timeout)
         .map_err(|e| Error::connection_context("bastion serverへの接続", e))?;
 
@@ -459,7 +466,8 @@ fn run_port_forwarding(
 
         // 各接続を個別スレッドで処理
         thread::spawn(move || {
-            if let Err(e) = handle_tunnel_connection(stream, session_clone, &postgres_host_owned, postgres_port)
+            if let Err(e) =
+                handle_tunnel_connection(stream, session_clone, &postgres_host_owned, postgres_port)
             {
                 tracing::error!("Tunnel connection error: {}", e);
             }

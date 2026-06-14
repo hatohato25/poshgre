@@ -1,21 +1,18 @@
+use crate::completion::{CompletionCache, CompletionItem};
+use ::skim::prelude::*;
 use crossterm::{
     event::{self},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{
-    backend::CrosstermBackend,
-    Terminal,
-};
-use crate::completion::{CompletionCache, CompletionItem};
-use ::skim::prelude::*;
+use ratatui::{backend::CrosstermBackend, Terminal};
 use std::borrow::Cow;
 use std::collections::VecDeque;
-use unicode_width::UnicodeWidthStr;
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::task::JoinHandle;
+use unicode_width::UnicodeWidthStr;
 
 use crate::config::{BastionConfig, BastionSetting, Config};
 use crate::connection::ConnectionManager;
@@ -75,8 +72,6 @@ impl SkimItem for ResultRowItem {
         Cow::Owned(self.row_index.to_string())
     }
 }
-
-
 
 /// 文字列を表示幅ベースで固定幅にパディングする
 ///
@@ -180,7 +175,11 @@ pub(super) fn append_preview_to_chunk(
             chunk_buf.as_str(),
         ) {
             // 書き込み失敗時はプレビューが表示されないだけで致命的ではないためwarnログに留める
-            tracing::warn!("プレビューチャンクの書き込みに失敗しました (chunk={}): {}", chunk_idx, e);
+            tracing::warn!(
+                "プレビューチャンクの書き込みに失敗しました (chunk={}): {}",
+                chunk_idx,
+                e
+            );
         }
         chunk_buf.clear();
     }
@@ -192,7 +191,11 @@ pub(super) fn flush_preview_chunk(dir: &std::path::Path, row_index: usize, chunk
         let chunk_idx = row_index / PREVIEW_CHUNK_SIZE;
         if let Err(e) = std::fs::write(dir.join(format!("chunk_{}.txt", chunk_idx)), chunk_buf) {
             // 書き込み失敗時はプレビューが表示されないだけで致命的ではないためwarnログに留める
-            tracing::warn!("最終プレビューチャンクの書き込みに失敗しました (chunk={}): {}", chunk_idx, e);
+            tracing::warn!(
+                "最終プレビューチャンクの書き込みに失敗しました (chunk={}): {}",
+                chunk_idx,
+                e
+            );
         }
     }
 }
@@ -320,9 +323,7 @@ pub(super) fn build_result_skim_options<'a>(
         .preview_window(Some("right:30%:wrap"))
         .no_mouse(true)
         .build()
-        .map_err(|e| {
-            crate::error::Error::Other(format!("{}: {:?}", t!(TuiMsg::SkimInitError), e))
-        })
+        .map_err(|e| crate::error::Error::Other(format!("{}: {:?}", t!(TuiMsg::SkimInitError), e)))
 }
 
 /// skimで選択された行からアクションを決定する
@@ -338,10 +339,16 @@ pub(super) fn determine_skim_action(
 ) -> SkimAction {
     if first_column == "schema_name" {
         // スキーマ一覧結果の場合: search_path を切り替える
-        SkimAction::DrillDown(format!("SET search_path TO {}", crate::query::escape_identifier(first_value)))
+        SkimAction::DrillDown(format!(
+            "SET search_path TO {}",
+            crate::query::escape_identifier(first_value)
+        ))
     } else if first_column == "tablename" {
         // pg_tables クエリ結果の場合: テーブルの SELECT に展開
-        SkimAction::DrillDown(format!("SELECT * FROM {}", crate::query::escape_identifier(first_value)))
+        SkimAction::DrillDown(format!(
+            "SELECT * FROM {}",
+            crate::query::escape_identifier(first_value)
+        ))
     } else {
         let record = SelectedRecord {
             columns: columns
@@ -354,7 +361,8 @@ pub(super) fn determine_skim_action(
         // テーブル名が取得できない場合は "?" をフォールバックとして使う
         // extract_from_table は "db.table" 形式（バッククォートなし）を返すため
         // "." で分割して各部分を個別に escape_identifier に渡す
-        let table_raw = crate::completion::extract_from_table(source_sql).unwrap_or_else(|| "?".to_string());
+        let table_raw =
+            crate::completion::extract_from_table(source_sql).unwrap_or_else(|| "?".to_string());
         let escaped_table = if let Some((db, tbl)) = table_raw.split_once('.') {
             format!(
                 "{}.{}",
@@ -700,7 +708,6 @@ impl App {
                 connection_name,
                 spinner_frame: 0,
             };
-
         }
 
         // ターミナル初期化
@@ -752,7 +759,11 @@ impl App {
                         selected_index: 0,
                     },
                 ) {
-                    AppState::StreamingQuery { manager, sql, timeout_secs } => (manager, sql, timeout_secs),
+                    AppState::StreamingQuery {
+                        manager,
+                        sql,
+                        timeout_secs,
+                    } => (manager, sql, timeout_secs),
                     other => {
                         self.state = other;
                         continue;
@@ -1028,26 +1039,21 @@ impl App {
                 // bastion経由接続中の場合はbastionサーバー上でコマンドを実行する。
                 // resolve_connections()適用後のConfigではbastionはConfig(BastionConfig)かNoneのみなので
                 // Toggle(true/false)は考慮不要。
-                let bastion_config: Option<BastionConfig> =
-                    self.current_connection_config().and_then(|config| {
-                        match &config.bastion {
-                            Some(BastionSetting::Config(cfg)) => Some(cfg.clone()),
-                            _ => None,
-                        }
+                let bastion_config: Option<BastionConfig> = self
+                    .current_connection_config()
+                    .and_then(|config| match &config.bastion {
+                        Some(BastionSetting::Config(cfg)) => Some(cfg.clone()),
+                        _ => None,
                     });
 
                 if bastion_config.is_some() {
-                    tracing::info!(
-                        "Executing shell command on bastion server: {}",
-                        cmd
-                    );
+                    tracing::info!("Executing shell command on bastion server: {}", cmd);
                 } else {
                     tracing::info!("Executing shell command locally: {}", cmd);
                 }
 
                 // TUI を一時停止
-                disable_raw_mode()
-                    .map_err(|e| Error::Tui(format!("ターミナル復元失敗: {}", e)))?;
+                disable_raw_mode().map_err(|e| Error::Tui(format!("ターミナル復元失敗: {}", e)))?;
                 execute!(terminal.backend_mut(), LeaveAlternateScreen)
                     .map_err(|e| Error::Tui(format!("ターミナル復元失敗: {}", e)))?;
 
@@ -1118,7 +1124,6 @@ impl App {
 
         Ok(())
     }
-
 
     /// 現在接続中のConnectionConfigを取得する（bastion判定に使用）
     ///
@@ -1234,7 +1239,9 @@ impl App {
         match task.await {
             Ok(Err(e)) => {
                 tracing::error!("Query execution failed: {}", e);
-                let error_message = t!(TuiMsg::QueryFailed { detail: &e.user_message() });
+                let error_message = t!(TuiMsg::QueryFailed {
+                    detail: &e.user_message()
+                });
                 let previous_state = Box::new(AppState::Connected { manager });
                 self.state = AppState::Error {
                     message: error_message,
@@ -1293,7 +1300,9 @@ impl App {
                 let error_message = if join_error.is_cancelled() {
                     t!(TuiMsg::QueryCancelled { query: &query })
                 } else {
-                    t!(TuiMsg::QueryTaskFailed { detail: &join_error.to_string() })
+                    t!(TuiMsg::QueryTaskFailed {
+                        detail: &join_error.to_string()
+                    })
                 };
                 let previous_state = Box::new(AppState::Connected { manager });
                 self.state = AppState::Error {
@@ -1318,7 +1327,11 @@ impl App {
 
         if !finished {
             // 接続中はスピナーフレームを進める
-            if let AppState::Connecting { ref mut spinner_frame, .. } = self.state {
+            if let AppState::Connecting {
+                ref mut spinner_frame,
+                ..
+            } = self.state
+            {
                 *spinner_frame = spinner_frame.wrapping_add(1);
             }
             return Ok(());
@@ -1329,7 +1342,9 @@ impl App {
         };
 
         let connection_name = match &self.state {
-            AppState::Connecting { connection_name, .. } => connection_name.clone(),
+            AppState::Connecting {
+                connection_name, ..
+            } => connection_name.clone(),
             _ => return Ok(()),
         };
 
@@ -1450,10 +1465,7 @@ impl App {
     /// - エージェントが内部で実行した SELECT は別接続で完結するため
     ///   TUI 側のクエリ結果テーブルには影響しない
     pub(super) async fn poll_prompt_completion(&mut self) {
-        let task_finished = self
-            .prompt_task
-            .as_ref()
-            .is_some_and(|t| t.is_finished());
+        let task_finished = self.prompt_task.as_ref().is_some_and(|t| t.is_finished());
 
         if !task_finished {
             return;
@@ -1486,10 +1498,7 @@ impl App {
             }
             Err(join_error) => {
                 tracing::error!("PROMPT task panicked: {}", join_error);
-                self.prompt.last_error = Some(format!(
-                    "タスクが異常終了しました: {}",
-                    join_error
-                ));
+                self.prompt.last_error = Some(format!("タスクが異常終了しました: {}", join_error));
                 self.prompt.is_processing = false;
                 // アニメーションを停止するためカウンターをリセットする
                 self.prompt.loading_tick = 0;
@@ -1620,10 +1629,7 @@ async fn refresh_table_cache(
     let mut cache_write = cache.write().await;
     cache_write.tables = tables;
 
-    tracing::debug!(
-        "Table cache refreshed: {} tables",
-        cache_write.tables.len()
-    );
+    tracing::debug!("Table cache refreshed: {} tables", cache_write.tables.len());
 
     Ok(())
 }
@@ -1812,7 +1818,7 @@ mod tests {
     fn test_word_right_from_end() {
         let app = make_app_with_input("SELECT");
         let len = "SELECT".chars().count(); // 6
-        // 末尾からの word_right は末尾のまま
+                                            // 末尾からの word_right は末尾のまま
         assert_eq!(app.word_right(len), len);
     }
 
