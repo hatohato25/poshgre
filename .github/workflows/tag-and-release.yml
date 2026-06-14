@@ -129,8 +129,13 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Cargo.toml
-          git commit -m "chore: bump version to ${VERSION}"
-          git push origin HEAD
+          # 変更がない場合はコミットをスキップ
+          if git diff --cached --quiet; then
+            echo "Cargo.toml already at version ${VERSION}, skipping commit"
+          else
+            git commit -m "chore: bump version to ${VERSION}"
+            git push origin HEAD
+          fi
 
       - name: Create and push tag
         run: |
