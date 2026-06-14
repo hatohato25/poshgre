@@ -1,0 +1,64 @@
+# Tarpaulin configuration for code coverage
+# Usage: cargo tarpaulin --config .tarpaulin.toml
+
+[default]
+# カバレッジ計測対象
+packages = ["poshgre"]
+
+# カバレッジ出力形式
+# - Stdout: 標準出力に結果を表示
+# - Html: HTMLレポート生成
+# - Xml: Cobertura XML形式（CI連携用）
+# - Lcov: Lcov形式（エディタ統合用）
+output-dir = "target/tarpaulin"
+out = ["Stdout", "Html", "Xml", "Lcov"]
+
+# テスト実行オプション
+# --all-features: すべてのフィーチャーを有効化
+# --workspace: ワークスペース全体をテスト
+all-features = true
+workspace = true
+
+# タイムアウト設定（秒）
+# testcontainersを使用するテストは時間がかかるため長めに設定
+timeout = 300
+
+# 除外するファイルパターン
+exclude-files = [
+    "target/*",
+    "tests/*",
+    "examples/*",
+]
+
+# 除外する関数パターン
+# main関数、テストコード、派生トレイトの実装は除外
+exclude = [
+    "main",
+    "tests::",
+]
+
+# カバレッジ計測対象の最小行数
+# 小さい関数（getter等）は除外しない
+# min-lines = 0
+
+# 失敗したテストもカバレッジに含める
+# run-types = ["Tests", "Doctests"]
+
+# カバレッジレポートの詳細レベル
+# - Verbose: 詳細なログ出力
+verbose = true
+
+# 並列実行設定
+# jobs = 4
+
+# Docker/Podman設定
+# testcontainersを使用する場合、Docker/Podmanが必要
+# 環境変数でDockerホストを指定可能: DOCKER_HOST=unix:///var/run/docker.sock
+
+[html]
+# HTMLレポート設定
+# output-dir = "target/tarpaulin/html"
+
+[xml]
+# XML（Cobertura）レポート設定
+# output-file = "target/tarpaulin/cobertura.xml"

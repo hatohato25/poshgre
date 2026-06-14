@@ -1,0 +1,32 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Configuration (sensitive)
+config.toml
+config.test.toml
+config.stg.toml
+config.rds.toml
+*.key
+*.pem
+
+# Logs
+*.log
+
+# Development
+/tmp/
+
+# claude
+.claude/

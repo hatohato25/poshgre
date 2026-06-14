@@ -1,0 +1,92 @@
+# poshgre configuration file example
+# Place this file at: ~/.config/poshgre/config.toml
+# For security, restrict permissions: chmod 600 ~/.config/poshgre/config.toml
+
+# ---------------------------------------------------------------------------
+# Application settings (optional)
+# ---------------------------------------------------------------------------
+[settings]
+# language = "ja"  # Display language: "en" (default) or "ja"
+# anthropic_api_key = "sk-ant-..."  # Anthropic API key for AI prompt feature
+#                                   # Can also be set via ANTHROPIC_API_KEY environment variable
+# claude_model = "claude-sonnet-4-6"  # Claude model to use (default: claude-3-5-haiku-20241022)
+#                                     # Can also be set via CLAUDE_MODEL environment variable
+
+# ---------------------------------------------------------------------------
+# Direct connection (no bastion required)
+# ---------------------------------------------------------------------------
+[[connections]]
+name = "local-dev"
+# No [connections.bastion] section needed for direct connections.
+# If you have a [default_bastion] configured globally, set `bastion = false`
+# to explicitly skip it and connect directly:
+# bastion = false
+
+[connections.postgres]
+host = "127.0.0.1"
+port = 15432
+database = "testdb"
+user = "testuser"
+password = "testpass"
+timeout = 30
+# ssl_mode: "disable" (default for local), "require", "verify-ca", or "verify-full"
+ssl_mode = "disable"  # disable is acceptable for local development
+
+# Connection pool settings (optional — defaults shown below)
+[connections.postgres.pool]
+max_connections = 5   # Maximum number of connections (default: 10)
+idle_timeout = 300    # Idle connection timeout in seconds (default: 300)
+
+# ---------------------------------------------------------------------------
+# Bastion (SSH jump host) connection example
+# ---------------------------------------------------------------------------
+[[connections]]
+name = "production"
+readonly = true  # Mark connection as read-only (prevents accidental writes)
+
+[connections.bastion]
+host = "bastion.example.com"  # Bastion server hostname or IP
+port = 22
+user = "your_ssh_user"
+key_path = "~/.ssh/id_rsa"    # Path to your SSH private key
+# Omit key_path to use your SSH agent (e.g., 1Password SSH agent)
+
+[connections.postgres]
+host = "postgres.internal.example.com"  # PostgreSQL host reachable from the bastion
+port = 5432
+database = "your_database"
+user = "your_db_user"
+password = "your_password"
+timeout = 60
+ssl_mode = "require"  # Always use "require" or stronger in production
+# ssl_mode = "verify-ca"    # Verify server certificate against a CA
+# ssl_mode = "verify-full"  # Verify server certificate and hostname (most secure)
+
+# Increase pool size for production workloads
+[connections.postgres.pool]
+max_connections = 20
+idle_timeout = 600
+
+# ---------------------------------------------------------------------------
+# Another connection example (e.g., staging)
+# ---------------------------------------------------------------------------
+[[connections]]
+name = "staging"
+
+[connections.bastion]
+host = "10.0.0.1"   # Bastion server IP address
+port = 22
+user = "your_ssh_user"
+key_path = "~/.ssh/id_rsa"
+
+[connections.postgres]
+host = "postgres.internal.example.com"
+port = 5432
+database = "your_database"
+user = "your_db_user"
+password = "your_password"
+timeout = 45
+ssl_mode = "require"  # "require" is recommended even for non-production environments
+
+# Omitting [connections.postgres.pool] uses default values:
+#   max_connections = 10, idle_timeout = 300

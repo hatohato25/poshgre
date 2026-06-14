@@ -1,0 +1,120 @@
+name: Build and Publish
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_call:
+    inputs:
+      tag_name:
+        description: 'Tag name to build (e.g. v0.3.0)'
+        required: true
+        type: string
+    secrets:
+      HOMEBREW_GITHUB_TOKEN:
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    env:
+      # workflow_call 経由では inputs.tag_name、タグ push 経由では github.ref_name を使う
+      TAG_NAME: ${{ inputs.tag_name != '' && inputs.tag_name || github.ref_name }}
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.tag_name != '' && inputs.tag_name || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - name: Install musl-tools
+        if: contains(matrix.target, 'linux-musl')
+        run: sudo apt-get install -y musl-tools
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Create tarball
+        id: tarball
+        run: |
+          TARBALL="posh-${TAG_NAME}-${{ matrix.target }}.tar.gz"
+          tar -czf "$TARBALL" -C target/${{ matrix.target }}/release posh
+          if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
+            sha256sum "$TARBALL" > "$TARBALL.sha256"
+            echo "sha256=$(sha256sum $TARBALL | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+          else
+            shasum -a 256 "$TARBALL" > "$TARBALL.sha256"
+            echo "sha256=$(shasum -a 256 $TARBALL | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+          fi
+          echo "name=$TARBALL" >> $GITHUB_OUTPUT
+
+      - name: Upload to GitHub Releases
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: ${{ env.TAG_NAME }}
+          files: |
+            ${{ steps.tarball.outputs.name }}
+            ${{ steps.tarball.outputs.name }}.sha256
+
+    outputs:
+      sha256: ${{ steps.tarball.outputs.sha256 }}
+      target: ${{ matrix.target }}
+
+  update-formula:
+    name: Update Homebrew Formula
+    needs: build
+    runs-on: ubuntu-slim
+    steps:
+      - name: Checkout homebrew-poshgre
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: hatohato25/homebrew-poshgre
+          token: ${{ secrets.HOMEBREW_GITHUB_TOKEN }}
+
+      - name: Download sha256 files from release
+        run: |
+          VERSION="${{ inputs.tag_name != '' && inputs.tag_name || github.ref_name }}"
+          BASE_URL="https://github.com/hatohato25/poshgre/releases/download/${VERSION}"
+
+          # sha256ファイルの形式は "<sha256値>  <ファイル名>" のため awk で先頭フィールドを取得する
+          AARCH64_SHA256=$(curl -fsSL "${BASE_URL}/posh-${VERSION}-aarch64-apple-darwin.tar.gz.sha256" | awk '{print $1}')
+          X86_64_SHA256=$(curl -fsSL "${BASE_URL}/posh-${VERSION}-x86_64-apple-darwin.tar.gz.sha256" | awk '{print $1}')
+
+          echo "AARCH64_SHA256=$AARCH64_SHA256" >> $GITHUB_ENV
+          echo "X86_64_SHA256=$X86_64_SHA256" >> $GITHUB_ENV
+          echo "VERSION=${VERSION#v}" >> $GITHUB_ENV
+
+      - name: Update Formula
+        run: |
+          sed -i "s/version \".*\"/version \"${VERSION}\"/" Formula/poshgre.rb
+          # aarch64 sha256 を更新（on_arm ブロック内の sha256）
+          perl -i -0pe "s|(on_arm do.*?sha256 \")[a-f0-9]+(\")|\\1${AARCH64_SHA256}\\2|s" Formula/poshgre.rb
+          # x86_64 sha256 を更新（on_intel ブロック内の sha256）
+          perl -i -0pe "s|(on_intel do.*?sha256 \")[a-f0-9]+(\")|\\1${X86_64_SHA256}\\2|s" Formula/poshgre.rb
+          echo "Updated: version=${VERSION}, aarch64=${AARCH64_SHA256}, x86_64=${X86_64_SHA256}"
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/poshgre.rb
+          git commit -m "Update poshgre to v${VERSION}"
+          git push
