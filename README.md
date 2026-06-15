@@ -20,6 +20,7 @@ A TUI PostgreSQL client for fast database exploration with fuzzy search, written
 
 ```bash
 brew tap hatohato25/poshgre
+brew trust --formula hatohato25/poshgre/poshgre  # Required if HOMEBREW_REQUIRE_TAP_TRUST is set
 brew install poshgre
 ```
 
