@@ -105,10 +105,12 @@ jobs:
       - name: Update Formula
         run: |
           sed -i "s/version \".*\"/version \"${VERSION}\"/" Formula/poshgre.rb
-          # aarch64 sha256 を更新（on_arm ブロック内の sha256）
-          perl -i -0pe "s|(on_arm do.*?sha256 \")[a-f0-9]+(\")|\\1${AARCH64_SHA256}\\2|s" Formula/poshgre.rb
-          # x86_64 sha256 を更新（on_intel ブロック内の sha256）
-          perl -i -0pe "s|(on_intel do.*?sha256 \")[a-f0-9]+(\")|\\1${X86_64_SHA256}\\2|s" Formula/poshgre.rb
+          # formula 内の sha256 は aarch64 が先、x86_64 が後に1回ずつ現れる
+          # 置換前に現在値を取得してから sed で差し替えることで順序を保証する
+          FIRST_SHA=$(grep -m1 'sha256 "[a-f0-9]*"' Formula/poshgre.rb | grep -o '"[a-f0-9]*"' | tr -d '"')
+          SECOND_SHA=$(grep 'sha256 "[a-f0-9]*"' Formula/poshgre.rb | tail -1 | grep -o '"[a-f0-9]*"' | tr -d '"')
+          sed -i "s/sha256 \"${FIRST_SHA}\"/sha256 \"${AARCH64_SHA256}\"/" Formula/poshgre.rb
+          sed -i "s/sha256 \"${SECOND_SHA}\"/sha256 \"${X86_64_SHA256}\"/" Formula/poshgre.rb
           echo "Updated: version=${VERSION}, aarch64=${AARCH64_SHA256}, x86_64=${X86_64_SHA256}"
 
       - name: Commit and push
