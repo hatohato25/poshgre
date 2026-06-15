@@ -20,7 +20,7 @@ A TUI PostgreSQL client for fast database exploration with fuzzy search, written
 
 ```bash
 brew tap hatohato25/poshgre
-brew install posh
+brew install poshgre
 ```
 
 ### Linux / WSL (Windows Subsystem for Linux)
