@@ -841,17 +841,56 @@ impl App {
     }
 
     /// Shell入力エリアのキー入力処理
-    ///
-    /// selection_start / kill_buffer は SQL 入力エリア専用のため Shell では使用しない。
     pub(super) async fn handle_shell_input(&mut self, key_event: event::KeyEvent) -> Result<()> {
         match key_event.code {
             // Enter: トリム後が空でなければシェルコマンドを実行予約する
             KeyCode::Enter if !self.shell.text.trim().is_empty() => {
                 self.execute_shell_command();
             }
-            // Ctrl+C: 終了
+            // Ctrl+C: 選択範囲をクリップボードにコピー（選択なしの場合は終了）
             KeyCode::Char('c') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.should_quit = true;
+                if let Some((byte_start, byte_end)) = self.shell_selection_byte_range() {
+                    let selected_text = &self.shell.text[byte_start..byte_end];
+                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                        let _ = clipboard.set_text(selected_text.to_string());
+                    }
+                    // コピー後は選択解除
+                    self.shell.selection_start = None;
+                } else {
+                    // 選択範囲がない場合は従来のCtrl+C動作（終了）
+                    self.should_quit = true;
+                }
+            }
+            // Ctrl+X: 選択範囲をカット
+            KeyCode::Char('x') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
+                if let Some((byte_start, byte_end)) = self.shell_selection_byte_range() {
+                    let selected_text = self.shell.text[byte_start..byte_end].to_string();
+                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                        let _ = clipboard.set_text(selected_text);
+                    }
+                    // 選択範囲を削除してカーソルを選択開始位置に移動
+                    let cursor_start = self
+                        .shell
+                        .selection_start
+                        .unwrap_or(self.shell.cursor_position)
+                        .min(self.shell.cursor_position);
+                    self.shell.text.replace_range(byte_start..byte_end, "");
+                    self.shell.cursor_position = cursor_start;
+                    self.shell.selection_start = None;
+                }
+            }
+            // Ctrl+V: クリップボードからペースト
+            KeyCode::Char('v') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
+                // 選択範囲があれば先に削除（上書きペースト）
+                self.delete_shell_selection();
+                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                    if let Ok(text) = clipboard.get_text() {
+                        let sanitized = text.replace('\r', "");
+                        let byte_pos = self.shell_char_to_byte(self.shell.cursor_position);
+                        self.shell.text.insert_str(byte_pos, &sanitized);
+                        self.shell.cursor_position += sanitized.chars().count();
+                    }
+                }
             }
             // Tab: Shell → Prompt にフォーカスを進める（Sql → Shell → Prompt → Sql の循環）
             // APIキー未設定時は Prompt をスキップして Shell → Sql に進める
@@ -876,103 +915,238 @@ impl App {
             KeyCode::Down => {
                 self.shell_history_next();
             }
-            // Ctrl+A / Home: 行頭へ
+            // Ctrl+A: 全選択（行頭を選択開始点にしてカーソルを末尾へ）
             KeyCode::Char('a') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.shell.cursor_position = 0;
+                self.shell.selection_start = Some(0);
+                self.shell.cursor_position = self.shell.text.chars().count();
             }
-            KeyCode::Home => {
-                self.shell.cursor_position = 0;
-            }
-            // Ctrl+E / End: 行末へ
+            // Ctrl+E: カーソルを行末へ（選択解除）
             KeyCode::Char('e') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.shell.cursor_position = self.shell.text.chars().count();
+                self.shell.selection_start = None;
             }
-            KeyCode::End => {
-                self.shell.cursor_position = self.shell.text.chars().count();
-            }
-            // Ctrl+K: カーソルから末尾まで削除
+            // Ctrl+K: カーソル位置から行末までを削除（kill-line）
+            // 選択範囲がある場合は選択範囲を削除する
             KeyCode::Char('k') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
-                let byte_pos = self.shell_char_to_byte(self.shell.cursor_position);
-                self.shell.text.truncate(byte_pos);
+                if self.shell.selection_start.is_some() {
+                    self.delete_shell_selection();
+                } else {
+                    let byte_start = self.shell_char_to_byte(self.shell.cursor_position);
+                    // 削除範囲を kill_buffer に保存する
+                    self.shell.kill_buffer = self.shell.text[byte_start..].to_string();
+                    self.shell.text.truncate(byte_start);
+                    // cursor_position はそのまま（行末に到達した状態）
+                }
             }
-            // Ctrl+U: 先頭からカーソルまで削除
+            // Ctrl+U: 行頭からカーソル位置までを削除（kill-whole-line 前半）
+            // 選択範囲がある場合は選択範囲を削除する
             KeyCode::Char('u') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
-                let byte_pos = self.shell_char_to_byte(self.shell.cursor_position);
-                self.shell.text.replace_range(..byte_pos, "");
-                self.shell.cursor_position = 0;
+                if self.shell.selection_start.is_some() {
+                    self.delete_shell_selection();
+                } else {
+                    let byte_end = self.shell_char_to_byte(self.shell.cursor_position);
+                    // 削除範囲を kill_buffer に保存する
+                    self.shell.kill_buffer = self.shell.text[..byte_end].to_string();
+                    self.shell.text.replace_range(..byte_end, "");
+                    self.shell.cursor_position = 0;
+                }
             }
-            // Ctrl+W: 前の単語を削除
+            // Ctrl+W: カーソル直前の単語を削除（bash readline backward-kill-word）
+            // Opt+Backspace と同じ動作（Linux環境での互換性）
             KeyCode::Char('w') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
-                let new_pos = self.shell_word_left(self.shell.cursor_position);
-                if new_pos < self.shell.cursor_position {
-                    let byte_start = self.shell_char_to_byte(new_pos);
-                    let byte_end = self.shell_char_to_byte(self.shell.cursor_position);
-                    self.shell.text.replace_range(byte_start..byte_end, "");
-                    self.shell.cursor_position = new_pos;
+                if self.shell.selection_start.is_some() {
+                    self.delete_shell_selection();
+                } else {
+                    let new_pos = self.shell_word_left(self.shell.cursor_position);
+                    if new_pos < self.shell.cursor_position {
+                        let byte_start = self.shell_char_to_byte(new_pos);
+                        let byte_end = self.shell_char_to_byte(self.shell.cursor_position);
+                        self.shell.text.replace_range(byte_start..byte_end, "");
+                        self.shell.cursor_position = new_pos;
+                    }
                 }
             }
-            // Alt+Backspace: 前の単語を削除
-            KeyCode::Backspace if key_event.modifiers.contains(KeyModifiers::ALT) => {
-                let new_pos = self.shell_word_left(self.shell.cursor_position);
-                if new_pos < self.shell.cursor_position {
-                    let byte_start = self.shell_char_to_byte(new_pos);
-                    let byte_end = self.shell_char_to_byte(self.shell.cursor_position);
-                    self.shell.text.replace_range(byte_start..byte_end, "");
-                    self.shell.cursor_position = new_pos;
+            // Ctrl+Y: キルバッファからペースト（yank）
+            KeyCode::Char('y') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.delete_shell_selection();
+                if !self.shell.kill_buffer.is_empty() {
+                    let byte_pos = self.shell_char_to_byte(self.shell.cursor_position);
+                    let yanked = self.shell.kill_buffer.clone();
+                    self.shell.text.insert_str(byte_pos, &yanked);
+                    self.shell.cursor_position += yanked.chars().count();
                 }
             }
-            // Alt+Left / Alt+b: 1単語左へ移動
-            KeyCode::Left if key_event.modifiers.contains(KeyModifiers::ALT) => {
+            // Opt+Shift+← / Alt+Shift+←: 選択しながら1単語左へ移動
+            // ALT+SHIFT 複合修飾子は ALT 単独・SHIFT 単独より前に配置してマッチ優先度を確保する
+            KeyCode::Left
+                if key_event.modifiers.contains(KeyModifiers::ALT)
+                    && key_event.modifiers.contains(KeyModifiers::SHIFT) =>
+            {
+                if self.shell.selection_start.is_none() {
+                    self.shell.selection_start = Some(self.shell.cursor_position);
+                }
                 self.shell.cursor_position = self.shell_word_left(self.shell.cursor_position);
             }
-            KeyCode::Char('b') if key_event.modifiers.contains(KeyModifiers::ALT) => {
-                self.shell.cursor_position = self.shell_word_left(self.shell.cursor_position);
-            }
-            // Alt+Right / Alt+f: 1単語右へ移動
-            KeyCode::Right if key_event.modifiers.contains(KeyModifiers::ALT) => {
+            // Opt+Shift+→ / Alt+Shift+→: 選択しながら1単語右へ移動
+            KeyCode::Right
+                if key_event.modifiers.contains(KeyModifiers::ALT)
+                    && key_event.modifiers.contains(KeyModifiers::SHIFT) =>
+            {
+                if self.shell.selection_start.is_none() {
+                    self.shell.selection_start = Some(self.shell.cursor_position);
+                }
                 self.shell.cursor_position = self.shell_word_right(self.shell.cursor_position);
             }
-            KeyCode::Char('f') if key_event.modifiers.contains(KeyModifiers::ALT) => {
-                self.shell.cursor_position = self.shell_word_right(self.shell.cursor_position);
-            }
-            // Left: 1文字左へ移動
-            KeyCode::Left if self.shell.cursor_position > 0 => {
+            // Shift+Left: 選択しながら左へ移動
+            // 通常の Left より前に配置して Shift 修飾子付きが先にマッチするようにする
+            KeyCode::Left
+                if key_event.modifiers.contains(KeyModifiers::SHIFT)
+                    && self.shell.cursor_position > 0 =>
+            {
+                if self.shell.selection_start.is_none() {
+                    self.shell.selection_start = Some(self.shell.cursor_position);
+                }
                 self.shell.cursor_position -= 1;
             }
-            // Right: 1文字右へ移動
+            // Shift+Right: 選択しながら右へ移動
+            KeyCode::Right if key_event.modifiers.contains(KeyModifiers::SHIFT) => {
+                let char_count = self.shell.text.chars().count();
+                if self.shell.cursor_position < char_count {
+                    if self.shell.selection_start.is_none() {
+                        self.shell.selection_start = Some(self.shell.cursor_position);
+                    }
+                    self.shell.cursor_position += 1;
+                }
+            }
+            // Shift+Home: 選択しながら行頭へ
+            KeyCode::Home if key_event.modifiers.contains(KeyModifiers::SHIFT) => {
+                if self.shell.selection_start.is_none() {
+                    self.shell.selection_start = Some(self.shell.cursor_position);
+                }
+                self.shell.cursor_position = 0;
+            }
+            // Shift+End: 選択しながら行末へ
+            KeyCode::End if key_event.modifiers.contains(KeyModifiers::SHIFT) => {
+                if self.shell.selection_start.is_none() {
+                    self.shell.selection_start = Some(self.shell.cursor_position);
+                }
+                self.shell.cursor_position = self.shell.text.chars().count();
+            }
+            // Opt+← / Alt+←: 1単語左へ移動（選択解除）
+            // iTerm2 / crossterm 標準パターン
+            KeyCode::Left if key_event.modifiers.contains(KeyModifiers::ALT) => {
+                self.shell.selection_start = None;
+                self.shell.cursor_position = self.shell_word_left(self.shell.cursor_position);
+            }
+            // ESC b（Terminal.app の meta-key 送信形式）
+            KeyCode::Char('b') if key_event.modifiers.contains(KeyModifiers::ALT) => {
+                self.shell.selection_start = None;
+                self.shell.cursor_position = self.shell_word_left(self.shell.cursor_position);
+            }
+            // Opt+→ / Alt+→: 1単語右へ移動（選択解除）
+            // iTerm2 / crossterm 標準パターン
+            KeyCode::Right if key_event.modifiers.contains(KeyModifiers::ALT) => {
+                self.shell.selection_start = None;
+                self.shell.cursor_position = self.shell_word_right(self.shell.cursor_position);
+            }
+            // ESC f（Terminal.app の meta-key 送信形式）
+            KeyCode::Char('f') if key_event.modifiers.contains(KeyModifiers::ALT) => {
+                self.shell.selection_start = None;
+                self.shell.cursor_position = self.shell_word_right(self.shell.cursor_position);
+            }
+            // Opt+Backspace / Alt+Backspace: カーソル直前の単語を削除
+            // 選択範囲がある場合は選択範囲を削除する
+            KeyCode::Backspace if key_event.modifiers.contains(KeyModifiers::ALT) => {
+                if self.shell.selection_start.is_some() {
+                    self.delete_shell_selection();
+                } else {
+                    let new_pos = self.shell_word_left(self.shell.cursor_position);
+                    if new_pos < self.shell.cursor_position {
+                        let byte_start = self.shell_char_to_byte(new_pos);
+                        let byte_end = self.shell_char_to_byte(self.shell.cursor_position);
+                        self.shell.text.replace_range(byte_start..byte_end, "");
+                        self.shell.cursor_position = new_pos;
+                    }
+                }
+            }
+            // Opt+Delete / Alt+Delete: カーソル直後の単語を削除
+            // 選択範囲がある場合は選択範囲を削除する
+            KeyCode::Delete if key_event.modifiers.contains(KeyModifiers::ALT) => {
+                if self.shell.selection_start.is_some() {
+                    self.delete_shell_selection();
+                } else {
+                    let new_pos = self.shell_word_right(self.shell.cursor_position);
+                    if new_pos > self.shell.cursor_position {
+                        let byte_start = self.shell_char_to_byte(self.shell.cursor_position);
+                        let byte_end = self.shell_char_to_byte(new_pos);
+                        self.shell.text.replace_range(byte_start..byte_end, "");
+                        // cursor_position はそのまま（次の単語が繰り上がる）
+                    }
+                }
+            }
+            // Left: 1文字左へ移動（選択解除）
+            KeyCode::Left => {
+                self.shell.selection_start = None;
+                if self.shell.cursor_position > 0 {
+                    self.shell.cursor_position -= 1;
+                }
+            }
+            // Right: 1文字右へ移動（選択解除）
             KeyCode::Right => {
+                self.shell.selection_start = None;
                 let char_count = self.shell.text.chars().count();
                 if self.shell.cursor_position < char_count {
                     self.shell.cursor_position += 1;
                 }
             }
-            // Backspace: カーソル直前の1文字を削除
-            KeyCode::Backspace if self.shell.cursor_position > 0 => {
-                let byte_pos = self.shell_char_to_byte(self.shell.cursor_position - 1);
-                self.shell.text.remove(byte_pos);
-                self.shell.cursor_position -= 1;
+            // Home: 行頭へ移動（選択解除）
+            KeyCode::Home => {
+                self.shell.selection_start = None;
+                self.shell.cursor_position = 0;
             }
-            // Delete: カーソル直後の1文字を削除
-            KeyCode::Delete => {
-                let char_count = self.shell.text.chars().count();
-                if self.shell.cursor_position < char_count {
-                    let byte_pos = self.shell_char_to_byte(self.shell.cursor_position);
+            // End: 行末へ移動（選択解除）
+            KeyCode::End => {
+                self.shell.selection_start = None;
+                self.shell.cursor_position = self.shell.text.chars().count();
+            }
+            // Backspace: カーソル直前の1文字を削除（選択範囲があれば選択範囲を削除）
+            KeyCode::Backspace => {
+                if self.shell.selection_start.is_some() {
+                    self.delete_shell_selection();
+                } else if self.shell.cursor_position > 0 {
+                    let byte_pos = self.shell_char_to_byte(self.shell.cursor_position - 1);
                     self.shell.text.remove(byte_pos);
+                    self.shell.cursor_position -= 1;
+                }
+            }
+            // Delete: カーソル直後の1文字を削除（選択範囲があれば選択範囲を削除）
+            KeyCode::Delete => {
+                if self.shell.selection_start.is_some() {
+                    self.delete_shell_selection();
+                } else {
+                    let char_count = self.shell.text.chars().count();
+                    if self.shell.cursor_position < char_count {
+                        let byte_pos = self.shell_char_to_byte(self.shell.cursor_position);
+                        self.shell.text.remove(byte_pos);
+                    }
                 }
             }
             // Esc: Shell入力をクリアする
             KeyCode::Esc => {
                 self.shell.text.clear();
                 self.shell.cursor_position = 0;
+                self.shell.selection_start = None;
             }
             // Ctrl+J: 改行挿入（Shell入力でも複数行コマンドを入力できるようにする）
             KeyCode::Char('j') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.delete_shell_selection();
                 let byte_pos = self.shell_char_to_byte(self.shell.cursor_position);
                 self.shell.text.insert(byte_pos, '\n');
                 self.shell.cursor_position += 1;
             }
-            // 通常の文字入力
+            // 通常の文字入力（選択範囲があれば先に削除して上書き）
             KeyCode::Char(c) => {
+                self.delete_shell_selection();
                 let byte_pos = self.shell_char_to_byte(self.shell.cursor_position);
                 self.shell.text.insert(byte_pos, c);
                 self.shell.cursor_position += 1;
