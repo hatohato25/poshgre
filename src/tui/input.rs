@@ -1159,10 +1159,45 @@ impl App {
     /// PROMPT 入力エリアのキー入力処理
     ///
     /// Enter でバックグラウンドタスクを spawn して Claude API エージェントを起動する。
-    /// is_processing が true の間は Enter と文字入力を無視する。
+    /// Esc / Tab / Shift+Tab / Ctrl+C は is_processing に関係なく動作する。
+    /// その他の編集系キーは is_processing 中には無視する。
     pub(super) async fn handle_prompt_input(&mut self, key_event: event::KeyEvent) -> Result<()> {
+        // --- 処理中でも動作する制御キー ---
         match key_event.code {
-            // Enter: API キーが設定されていてかつ未処理の場合のみエージェントを起動する
+            // Esc: AIプロンプト入力をクリアする（SQL/Shell入力と操作を統一）
+            // フォーカス移動は Tab/Shift+Tab が担うため、Esc はクリア専用とする
+            KeyCode::Esc => {
+                self.prompt.text.clear();
+                self.prompt.cursor_position = 0;
+                self.prompt.selection_start = None;
+                return Ok(());
+            }
+            // Tab: PROMPT → Sql にフォーカスを進める（循環）
+            KeyCode::Tab => {
+                self.input_focus = InputFocus::Sql;
+                return Ok(());
+            }
+            // Shift+Tab: PROMPT → Shell に戻る（逆循環）
+            KeyCode::BackTab => {
+                self.input_focus = InputFocus::Shell;
+                return Ok(());
+            }
+            // Ctrl+C: 選択範囲をクリップボードにコピー（選択なしの場合は終了）
+            KeyCode::Char('c') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
+                if let Some((byte_start, byte_end)) = self.prompt_selection_byte_range() {
+                    let selected_text = &self.prompt.text[byte_start..byte_end];
+                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                        let _ = clipboard.set_text(selected_text.to_string());
+                    }
+                    // コピー後は選択解除
+                    self.prompt.selection_start = None;
+                } else {
+                    // 選択範囲がない場合は従来のCtrl+C動作（終了）
+                    self.should_quit = true;
+                }
+                return Ok(());
+            }
+            // Enter: APIキーが設定されていてかつ未処理の場合のみエージェントを起動する
             KeyCode::Enter if !self.prompt.is_processing => {
                 let prompt_text = self.prompt.text.trim().to_string();
                 if prompt_text.is_empty() {
@@ -1205,54 +1240,279 @@ impl App {
                     crate::claude::run_agent(&api_key, &model, &pool, &prompt_text).await
                 });
                 self.prompt_task = Some(handle);
+                return Ok(());
             }
-            // 処理中は Enter を無視する（上記の guard が false の場合）
-            KeyCode::Enter => {}
-            // Esc: SQL 入力エリアにフォーカスを戻す
-            KeyCode::Esc => {
-                self.input_focus = InputFocus::Sql;
+            // 処理中は Enter を無視する
+            KeyCode::Enter => {
+                return Ok(());
             }
-            // Tab: PROMPT → Sql にフォーカスを進める（循環）
-            KeyCode::Tab => {
-                self.input_focus = InputFocus::Sql;
+            _ => {}
+        }
+
+        // 処理中は以降の編集系キーを無視する
+        if self.prompt.is_processing {
+            return Ok(());
+        }
+
+        // --- 編集系キー ---
+        match key_event.code {
+            // Ctrl+X: 選択範囲をカット
+            KeyCode::Char('x') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
+                if let Some((byte_start, byte_end)) = self.prompt_selection_byte_range() {
+                    let selected_text = self.prompt.text[byte_start..byte_end].to_string();
+                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                        let _ = clipboard.set_text(selected_text);
+                    }
+                    // 選択範囲を削除してカーソルを選択開始位置に移動
+                    let cursor_start = self
+                        .prompt
+                        .selection_start
+                        .unwrap_or(self.prompt.cursor_position)
+                        .min(self.prompt.cursor_position);
+                    self.prompt.text.replace_range(byte_start..byte_end, "");
+                    self.prompt.cursor_position = cursor_start;
+                    self.prompt.selection_start = None;
+                }
             }
-            // Shift+Tab: PROMPT → Shell に戻る（逆循環）
-            KeyCode::BackTab => {
-                self.input_focus = InputFocus::Shell;
+            // Ctrl+V: クリップボードからペースト
+            KeyCode::Char('v') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
+                // 選択範囲があれば先に削除（上書きペースト）
+                self.delete_prompt_selection();
+                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                    if let Ok(text) = clipboard.get_text() {
+                        let sanitized = text.replace('\r', "");
+                        let byte_pos = self.prompt_char_to_byte(self.prompt.cursor_position);
+                        self.prompt.text.insert_str(byte_pos, &sanitized);
+                        self.prompt.cursor_position += sanitized.chars().count();
+                    }
+                }
             }
-            // Ctrl+C: 終了
-            KeyCode::Char('c') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.should_quit = true;
+            // Ctrl+A: 全選択（行頭を選択開始点にしてカーソルを末尾へ）
+            KeyCode::Char('a') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.prompt.selection_start = Some(0);
+                self.prompt.cursor_position = self.prompt.text.chars().count();
             }
-            // 処理中の場合は文字入力を無視する
-            KeyCode::Char(_) | KeyCode::Backspace if self.prompt.is_processing => {}
-            // 通常の文字入力: プロンプトテキストに挿入する
-            KeyCode::Char(c) => {
-                let byte_pos = self.prompt_char_to_byte(self.prompt.cursor_position);
-                self.prompt.text.insert(byte_pos, c);
-                self.prompt.cursor_position += 1;
+            // Ctrl+E: カーソルを行末へ（選択解除）
+            KeyCode::Char('e') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.prompt.cursor_position = self.prompt.text.chars().count();
+                self.prompt.selection_start = None;
             }
-            // Backspace: カーソル直前の文字を削除する
-            KeyCode::Backspace if self.prompt.cursor_position > 0 => {
-                let byte_pos = self.prompt_char_to_byte(self.prompt.cursor_position - 1);
-                self.prompt.text.remove(byte_pos);
+            // Ctrl+K: カーソル位置から行末までを削除（kill-line）
+            // 選択範囲がある場合は選択範囲を削除する
+            KeyCode::Char('k') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
+                if self.prompt.selection_start.is_some() {
+                    self.delete_prompt_selection();
+                } else {
+                    let byte_start = self.prompt_char_to_byte(self.prompt.cursor_position);
+                    // 削除範囲を kill_buffer に保存する
+                    self.prompt.kill_buffer = self.prompt.text[byte_start..].to_string();
+                    self.prompt.text.truncate(byte_start);
+                    // cursor_position はそのまま（行末に到達した状態）
+                }
+            }
+            // Ctrl+U: 行頭からカーソル位置までを削除（kill-whole-line 前半）
+            // 選択範囲がある場合は選択範囲を削除する
+            KeyCode::Char('u') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
+                if self.prompt.selection_start.is_some() {
+                    self.delete_prompt_selection();
+                } else {
+                    let byte_end = self.prompt_char_to_byte(self.prompt.cursor_position);
+                    // 削除範囲を kill_buffer に保存する
+                    self.prompt.kill_buffer = self.prompt.text[..byte_end].to_string();
+                    self.prompt.text.replace_range(..byte_end, "");
+                    self.prompt.cursor_position = 0;
+                }
+            }
+            // Ctrl+W: カーソル直前の単語を削除（bash readline backward-kill-word）
+            // Opt+Backspace と同じ動作（Linux環境での互換性）
+            KeyCode::Char('w') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
+                if self.prompt.selection_start.is_some() {
+                    self.delete_prompt_selection();
+                } else {
+                    let new_pos = self.prompt_word_left(self.prompt.cursor_position);
+                    if new_pos < self.prompt.cursor_position {
+                        let byte_start = self.prompt_char_to_byte(new_pos);
+                        let byte_end = self.prompt_char_to_byte(self.prompt.cursor_position);
+                        self.prompt.text.replace_range(byte_start..byte_end, "");
+                        self.prompt.cursor_position = new_pos;
+                    }
+                }
+            }
+            // Ctrl+Y: キルバッファからペースト（yank）
+            KeyCode::Char('y') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.delete_prompt_selection();
+                if !self.prompt.kill_buffer.is_empty() {
+                    let byte_pos = self.prompt_char_to_byte(self.prompt.cursor_position);
+                    let yanked = self.prompt.kill_buffer.clone();
+                    self.prompt.text.insert_str(byte_pos, &yanked);
+                    self.prompt.cursor_position += yanked.chars().count();
+                }
+            }
+            // Opt+Shift+← / Alt+Shift+←: 選択しながら1単語左へ移動
+            // ALT+SHIFT 複合修飾子は ALT 単独・SHIFT 単独より前に配置してマッチ優先度を確保する
+            KeyCode::Left
+                if key_event.modifiers.contains(KeyModifiers::ALT)
+                    && key_event.modifiers.contains(KeyModifiers::SHIFT) =>
+            {
+                if self.prompt.selection_start.is_none() {
+                    self.prompt.selection_start = Some(self.prompt.cursor_position);
+                }
+                self.prompt.cursor_position = self.prompt_word_left(self.prompt.cursor_position);
+            }
+            // Opt+Shift+→ / Alt+Shift+→: 選択しながら1単語右へ移動
+            KeyCode::Right
+                if key_event.modifiers.contains(KeyModifiers::ALT)
+                    && key_event.modifiers.contains(KeyModifiers::SHIFT) =>
+            {
+                if self.prompt.selection_start.is_none() {
+                    self.prompt.selection_start = Some(self.prompt.cursor_position);
+                }
+                self.prompt.cursor_position = self.prompt_word_right(self.prompt.cursor_position);
+            }
+            // Shift+Left: 選択しながら左へ移動
+            // 通常の Left より前に配置して Shift 修飾子付きが先にマッチするようにする
+            KeyCode::Left
+                if key_event.modifiers.contains(KeyModifiers::SHIFT)
+                    && self.prompt.cursor_position > 0 =>
+            {
+                if self.prompt.selection_start.is_none() {
+                    self.prompt.selection_start = Some(self.prompt.cursor_position);
+                }
                 self.prompt.cursor_position -= 1;
             }
-            KeyCode::Backspace => {}
-            // Left: カーソルを左に移動する
-            KeyCode::Left if self.prompt.cursor_position > 0 => {
-                self.prompt.cursor_position -= 1;
+            // Shift+Right: 選択しながら右へ移動
+            KeyCode::Right if key_event.modifiers.contains(KeyModifiers::SHIFT) => {
+                let char_count = self.prompt.text.chars().count();
+                if self.prompt.cursor_position < char_count {
+                    if self.prompt.selection_start.is_none() {
+                        self.prompt.selection_start = Some(self.prompt.cursor_position);
+                    }
+                    self.prompt.cursor_position += 1;
+                }
             }
-            KeyCode::Left => {}
-            // Right: カーソルを右に移動する
+            // Shift+Home: 選択しながら行頭へ
+            KeyCode::Home if key_event.modifiers.contains(KeyModifiers::SHIFT) => {
+                if self.prompt.selection_start.is_none() {
+                    self.prompt.selection_start = Some(self.prompt.cursor_position);
+                }
+                self.prompt.cursor_position = 0;
+            }
+            // Shift+End: 選択しながら行末へ
+            KeyCode::End if key_event.modifiers.contains(KeyModifiers::SHIFT) => {
+                if self.prompt.selection_start.is_none() {
+                    self.prompt.selection_start = Some(self.prompt.cursor_position);
+                }
+                self.prompt.cursor_position = self.prompt.text.chars().count();
+            }
+            // Opt+← / Alt+←: 1単語左へ移動（選択解除）
+            // iTerm2 / crossterm 標準パターン
+            KeyCode::Left if key_event.modifiers.contains(KeyModifiers::ALT) => {
+                self.prompt.selection_start = None;
+                self.prompt.cursor_position = self.prompt_word_left(self.prompt.cursor_position);
+            }
+            // ESC b（Terminal.app の meta-key 送信形式）
+            KeyCode::Char('b') if key_event.modifiers.contains(KeyModifiers::ALT) => {
+                self.prompt.selection_start = None;
+                self.prompt.cursor_position = self.prompt_word_left(self.prompt.cursor_position);
+            }
+            // Opt+→ / Alt+→: 1単語右へ移動（選択解除）
+            // iTerm2 / crossterm 標準パターン
+            KeyCode::Right if key_event.modifiers.contains(KeyModifiers::ALT) => {
+                self.prompt.selection_start = None;
+                self.prompt.cursor_position = self.prompt_word_right(self.prompt.cursor_position);
+            }
+            // ESC f（Terminal.app の meta-key 送信形式）
+            KeyCode::Char('f') if key_event.modifiers.contains(KeyModifiers::ALT) => {
+                self.prompt.selection_start = None;
+                self.prompt.cursor_position = self.prompt_word_right(self.prompt.cursor_position);
+            }
+            // Opt+Backspace / Alt+Backspace: カーソル直前の単語を削除
+            // 選択範囲がある場合は選択範囲を削除する
+            KeyCode::Backspace if key_event.modifiers.contains(KeyModifiers::ALT) => {
+                if self.prompt.selection_start.is_some() {
+                    self.delete_prompt_selection();
+                } else {
+                    let new_pos = self.prompt_word_left(self.prompt.cursor_position);
+                    if new_pos < self.prompt.cursor_position {
+                        let byte_start = self.prompt_char_to_byte(new_pos);
+                        let byte_end = self.prompt_char_to_byte(self.prompt.cursor_position);
+                        self.prompt.text.replace_range(byte_start..byte_end, "");
+                        self.prompt.cursor_position = new_pos;
+                    }
+                }
+            }
+            // Opt+Delete / Alt+Delete: カーソル直後の単語を削除
+            // 選択範囲がある場合は選択範囲を削除する
+            KeyCode::Delete if key_event.modifiers.contains(KeyModifiers::ALT) => {
+                if self.prompt.selection_start.is_some() {
+                    self.delete_prompt_selection();
+                } else {
+                    let new_pos = self.prompt_word_right(self.prompt.cursor_position);
+                    if new_pos > self.prompt.cursor_position {
+                        let byte_start = self.prompt_char_to_byte(self.prompt.cursor_position);
+                        let byte_end = self.prompt_char_to_byte(new_pos);
+                        self.prompt.text.replace_range(byte_start..byte_end, "");
+                        // cursor_position はそのまま（次の単語が繰り上がる）
+                    }
+                }
+            }
+            // Left: カーソルを左に移動（選択解除）
+            KeyCode::Left => {
+                self.prompt.selection_start = None;
+                if self.prompt.cursor_position > 0 {
+                    self.prompt.cursor_position -= 1;
+                }
+            }
+            // Right: カーソルを右に移動（選択解除）
             KeyCode::Right => {
+                self.prompt.selection_start = None;
                 let char_count = self.prompt.text.chars().count();
                 if self.prompt.cursor_position < char_count {
                     self.prompt.cursor_position += 1;
                 }
             }
+            // Home: 行頭へ移動（選択解除）
+            KeyCode::Home => {
+                self.prompt.selection_start = None;
+                self.prompt.cursor_position = 0;
+            }
+            // End: 行末へ移動（選択解除）
+            KeyCode::End => {
+                self.prompt.selection_start = None;
+                self.prompt.cursor_position = self.prompt.text.chars().count();
+            }
+            // Backspace: カーソル直前の文字を削除（選択範囲があれば選択範囲を削除）
+            KeyCode::Backspace => {
+                if self.prompt.selection_start.is_some() {
+                    self.delete_prompt_selection();
+                } else if self.prompt.cursor_position > 0 {
+                    let byte_pos = self.prompt_char_to_byte(self.prompt.cursor_position - 1);
+                    self.prompt.text.remove(byte_pos);
+                    self.prompt.cursor_position -= 1;
+                }
+            }
+            // Delete: カーソル直後の文字を削除（選択範囲があれば選択範囲を削除）
+            KeyCode::Delete => {
+                if self.prompt.selection_start.is_some() {
+                    self.delete_prompt_selection();
+                } else {
+                    let char_count = self.prompt.text.chars().count();
+                    if self.prompt.cursor_position < char_count {
+                        let byte_pos = self.prompt_char_to_byte(self.prompt.cursor_position);
+                        self.prompt.text.remove(byte_pos);
+                    }
+                }
+            }
+            // 通常の文字入力（選択範囲があれば先に削除して上書き）
+            KeyCode::Char(c) => {
+                self.delete_prompt_selection();
+                let byte_pos = self.prompt_char_to_byte(self.prompt.cursor_position);
+                self.prompt.text.insert(byte_pos, c);
+                self.prompt.cursor_position += 1;
+            }
             _ => {}
         }
+
         Ok(())
     }
 
@@ -1335,5 +1595,102 @@ impl App {
             pos += 1;
         }
         pos
+    }
+
+    /// Shell選択範囲のバイト範囲を返す（選択なしの場合はNone）
+    pub(super) fn shell_selection_byte_range(&self) -> Option<(usize, usize)> {
+        let sel_start = self.shell.selection_start?;
+        let start = sel_start.min(self.shell.cursor_position);
+        let end = sel_start.max(self.shell.cursor_position);
+        let byte_start = self.shell_char_to_byte(start);
+        let byte_end = self.shell_char_to_byte(end);
+        Some((byte_start, byte_end))
+    }
+
+    /// Shell選択範囲のテキストを削除し、カーソルを選択開始位置に移動する
+    ///
+    /// selection_startがNoneの場合は何もしない。
+    /// 呼び出し後はselection_startがNoneになる。
+    pub(super) fn delete_shell_selection(&mut self) {
+        if let Some((byte_start, byte_end)) = self.shell_selection_byte_range() {
+            let start = self
+                .shell
+                .selection_start
+                .unwrap_or(self.shell.cursor_position)
+                .min(self.shell.cursor_position);
+            self.shell.text.replace_range(byte_start..byte_end, "");
+            self.shell.cursor_position = start;
+            self.shell.selection_start = None;
+        }
+    }
+
+    /// prompt.text でカーソルを1単語左に移動した時の位置を返す
+    ///
+    /// shell_word_left と同じ動作だが prompt.text を参照する。
+    pub(super) fn prompt_word_left(&self, from: usize) -> usize {
+        if from == 0 {
+            return 0;
+        }
+        let chars: Vec<char> = self.prompt.text.chars().collect();
+        let mut pos = from;
+
+        // まず区切り文字をスキップ
+        while pos > 0 && crate::completion::is_completion_separator(chars[pos - 1]) {
+            pos -= 1;
+        }
+        // 次に単語文字を遡る
+        while pos > 0 && !crate::completion::is_completion_separator(chars[pos - 1]) {
+            pos -= 1;
+        }
+        pos
+    }
+
+    /// prompt.text でカーソルを1単語右に移動した時の位置を返す
+    ///
+    /// shell_word_right と同じ動作だが prompt.text を参照する。
+    pub(super) fn prompt_word_right(&self, from: usize) -> usize {
+        let chars: Vec<char> = self.prompt.text.chars().collect();
+        let len = chars.len();
+        if from >= len {
+            return len;
+        }
+        let mut pos = from;
+
+        // まず区切り文字をスキップ
+        while pos < len && crate::completion::is_completion_separator(chars[pos]) {
+            pos += 1;
+        }
+        // 次に単語文字を進む
+        while pos < len && !crate::completion::is_completion_separator(chars[pos]) {
+            pos += 1;
+        }
+        pos
+    }
+
+    /// Prompt選択範囲のバイト範囲を返す（選択なしの場合はNone）
+    pub(super) fn prompt_selection_byte_range(&self) -> Option<(usize, usize)> {
+        let sel_start = self.prompt.selection_start?;
+        let start = sel_start.min(self.prompt.cursor_position);
+        let end = sel_start.max(self.prompt.cursor_position);
+        let byte_start = self.prompt_char_to_byte(start);
+        let byte_end = self.prompt_char_to_byte(end);
+        Some((byte_start, byte_end))
+    }
+
+    /// Prompt選択範囲のテキストを削除し、カーソルを選択開始位置に移動する
+    ///
+    /// selection_startがNoneの場合は何もしない。
+    /// 呼び出し後はselection_startがNoneになる。
+    pub(super) fn delete_prompt_selection(&mut self) {
+        if let Some((byte_start, byte_end)) = self.prompt_selection_byte_range() {
+            let start = self
+                .prompt
+                .selection_start
+                .unwrap_or(self.prompt.cursor_position)
+                .min(self.prompt.cursor_position);
+            self.prompt.text.replace_range(byte_start..byte_end, "");
+            self.prompt.cursor_position = start;
+            self.prompt.selection_start = None;
+        }
     }
 }
