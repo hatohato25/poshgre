@@ -204,10 +204,10 @@ impl App {
             let c = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Length(2), // [0] パンくずリスト
-                    Constraint::Length(5), // [1] SQL入力エリア
-                    Constraint::Length(5), // [2] Shell入力エリア
-                    Constraint::Length(5), // [3] PROMPT 入力エリア
+                    Constraint::Length(2),                                     // [0] パンくずリスト
+                    Constraint::Length(self.settings.layout.sql_input_height), // [1] SQL入力エリア
+                    Constraint::Length(self.settings.layout.shell_input_height), // [2] Shell入力エリア
+                    Constraint::Length(self.settings.layout.prompt_input_height), // [3] PROMPT 入力エリア
                     Constraint::Min(3),    // [4] 接続情報・選択レコードプレビュー
                     Constraint::Length(3), // [5] ヘルプ
                 ])
@@ -217,9 +217,9 @@ impl App {
             let c = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Length(2), // [0] パンくずリスト
-                    Constraint::Length(5), // [1] SQL入力エリア
-                    Constraint::Length(5), // [2] Shell入力エリア
+                    Constraint::Length(2),                                     // [0] パンくずリスト
+                    Constraint::Length(self.settings.layout.sql_input_height), // [1] SQL入力エリア
+                    Constraint::Length(self.settings.layout.shell_input_height), // [2] Shell入力エリア
                     Constraint::Min(3),    // [3] 接続情報・選択レコードプレビュー
                     Constraint::Length(3), // [4] ヘルプ
                 ])
@@ -610,8 +610,9 @@ pub(super) fn build_multiline_text<'a>(
                     let sel_chars = overlap_end - overlap_start;
 
                     let before: String = row_chars[..before_chars].iter().collect();
-                    let selected: String =
-                        row_chars[before_chars..before_chars + sel_chars].iter().collect();
+                    let selected: String = row_chars[before_chars..before_chars + sel_chars]
+                        .iter()
+                        .collect();
                     let after: String = row_chars[before_chars + sel_chars..].iter().collect();
 
                     Line::from(vec![
@@ -869,7 +870,10 @@ mod tests {
     #[test]
     fn test_wrap_logical_line_basic() {
         // inner_width=5 で 12 文字をハード折り返しすると 3 物理行になる
-        assert_eq!(wrap_logical_line("abcdefghijkl", 5), vec![(0, 5), (5, 10), (10, 12)]);
+        assert_eq!(
+            wrap_logical_line("abcdefghijkl", 5),
+            vec![(0, 5), (5, 10), (10, 12)]
+        );
     }
 
     #[test]

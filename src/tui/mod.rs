@@ -312,6 +312,7 @@ pub(super) fn build_result_skim_options<'a>(
     header_line: &'a str,
     preview_cmd: &'a str,
     prompt: &'a str,
+    preview_window: &'a str,
 ) -> std::result::Result<SkimOptions<'a>, crate::error::Error> {
     SkimOptionsBuilder::default()
         .height(Some("100%"))
@@ -320,7 +321,7 @@ pub(super) fn build_result_skim_options<'a>(
         .header(Some(header_line))
         .prompt(Some(prompt))
         .preview(Some(preview_cmd))
-        .preview_window(Some("right:30%:wrap"))
+        .preview_window(Some(preview_window))
         .no_mouse(true)
         .build()
         .map_err(|e| crate::error::Error::Other(format!("{}: {:?}", t!(TuiMsg::SkimInitError), e)))

@@ -21,6 +21,69 @@ pub struct AppSettings {
     /// 未指定時は環境変数 CLAUDE_MODEL から取得する
     #[serde(default)]
     pub claude_model: Option<String>,
+
+    /// TUIレイアウト設定（入力エリアの高さ、プレビューペインの位置・サイズなど）
+    /// [settings.layout] セクションが存在しない場合は LayoutSettings::default() が使われる
+    #[serde(default)]
+    pub layout: LayoutSettings,
+}
+
+/// TUIレイアウト設定
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+pub struct LayoutSettings {
+    /// SQL入力エリアの高さ（行数、デフォルト: 5）
+    #[serde(default = "default_input_area_height")]
+    pub sql_input_height: u16,
+
+    /// Shell入力エリアの高さ（行数、デフォルト: 5）
+    #[serde(default = "default_input_area_height")]
+    pub shell_input_height: u16,
+
+    /// AI Prompt入力エリアの高さ（行数、デフォルト: 5）
+    /// APIキー未設定時は参照されない
+    #[serde(default = "default_input_area_height")]
+    pub prompt_input_height: u16,
+
+    /// 結果ビューアのプレビューペインのサイズ（%、デフォルト: 30）
+    #[serde(default = "default_result_preview_width")]
+    pub result_preview_width: u16,
+
+    /// 結果ビューアのプレビューペインの位置（デフォルト: Right）
+    #[serde(default = "default_result_preview_position")]
+    pub result_preview_position: PreviewPosition,
+}
+
+impl Default for LayoutSettings {
+    fn default() -> Self {
+        Self {
+            sql_input_height: default_input_area_height(),
+            shell_input_height: default_input_area_height(),
+            prompt_input_height: default_input_area_height(),
+            result_preview_width: default_result_preview_width(),
+            result_preview_position: default_result_preview_position(),
+        }
+    }
+}
+
+/// 結果ビューアのプレビューペインの位置
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PreviewPosition {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+impl PreviewPosition {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            PreviewPosition::Up => "up",
+            PreviewPosition::Down => "down",
+            PreviewPosition::Left => "left",
+            PreviewPosition::Right => "right",
+        }
+    }
 }
 
 /// アプリケーション設定
@@ -485,6 +548,19 @@ fn default_max_connections() -> u32 {
 
 fn default_idle_timeout() -> u64 {
     300
+}
+
+fn default_input_area_height() -> u16 {
+    5
+}
+
+fn default_result_preview_width() -> u16 {
+    30
+}
+
+fn default_result_preview_position() -> PreviewPosition {
+    // 既存のプレビューウィンドウ挙動（right:30%）を踏襲する
+    PreviewPosition::Right
 }
 
 #[cfg(test)]
@@ -1287,5 +1363,133 @@ password = "password"
             &config.connections[0].bastion,
             Some(BastionSetting::Toggle(false))
         ));
+    }
+
+    #[test]
+    fn test_layout_settings_default_when_section_missing() {
+        // [settings.layout] セクションを省略した場合、全フィールドがデフォルト値になること
+        let toml_content = r#"
+[[connections]]
+name = "test-layout-default"
+
+[connections.postgres]
+host = "localhost"
+port = 5432
+database = "testdb"
+user = "postgres"
+password = "password"
+"#;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        temp_file.write_all(toml_content.as_bytes()).unwrap();
+
+        #[cfg(unix)]
+        set_test_file_permissions_600(temp_file.path());
+
+        let config = Config::load(temp_file.path().to_str().unwrap()).unwrap();
+        let layout = config.settings.layout;
+        assert_eq!(layout.sql_input_height, 5);
+        assert_eq!(layout.shell_input_height, 5);
+        assert_eq!(layout.prompt_input_height, 5);
+        assert_eq!(layout.result_preview_width, 30);
+        assert_eq!(layout.result_preview_position, PreviewPosition::Right);
+    }
+
+    #[test]
+    fn test_layout_settings_all_fields_specified() {
+        // 全フィールドを指定した場合、指定値が反映されること
+        let toml_content = r#"
+[settings.layout]
+sql_input_height = 8
+shell_input_height = 6
+prompt_input_height = 4
+result_preview_width = 50
+result_preview_position = "left"
+
+[[connections]]
+name = "test-layout-full"
+
+[connections.postgres]
+host = "localhost"
+port = 5432
+database = "testdb"
+user = "postgres"
+password = "password"
+"#;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        temp_file.write_all(toml_content.as_bytes()).unwrap();
+
+        #[cfg(unix)]
+        set_test_file_permissions_600(temp_file.path());
+
+        let config = Config::load(temp_file.path().to_str().unwrap()).unwrap();
+        let layout = config.settings.layout;
+        assert_eq!(layout.sql_input_height, 8);
+        assert_eq!(layout.shell_input_height, 6);
+        assert_eq!(layout.prompt_input_height, 4);
+        assert_eq!(layout.result_preview_width, 50);
+        assert_eq!(layout.result_preview_position, PreviewPosition::Left);
+    }
+
+    #[test]
+    fn test_layout_settings_partial_fields_specified() {
+        // 一部フィールドのみ指定した場合、残りはデフォルトになること
+        let toml_content = r#"
+[settings.layout]
+sql_input_height = 10
+
+[[connections]]
+name = "test-layout-partial"
+
+[connections.postgres]
+host = "localhost"
+port = 5432
+database = "testdb"
+user = "postgres"
+password = "password"
+"#;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        temp_file.write_all(toml_content.as_bytes()).unwrap();
+
+        #[cfg(unix)]
+        set_test_file_permissions_600(temp_file.path());
+
+        let config = Config::load(temp_file.path().to_str().unwrap()).unwrap();
+        let layout = config.settings.layout;
+        assert_eq!(layout.sql_input_height, 10);
+        assert_eq!(layout.shell_input_height, 5);
+        assert_eq!(layout.prompt_input_height, 5);
+        assert_eq!(layout.result_preview_width, 30);
+        assert_eq!(layout.result_preview_position, PreviewPosition::Right);
+    }
+
+    #[test]
+    fn test_layout_settings_invalid_preview_position() {
+        // result_preview_position に不正な値を指定した場合、Config::loadがErrを返すこと
+        let toml_content = r#"
+[settings.layout]
+result_preview_position = "top"
+
+[[connections]]
+name = "test-layout-invalid"
+
+[connections.postgres]
+host = "localhost"
+port = 5432
+database = "testdb"
+user = "postgres"
+password = "password"
+"#;
+
+        let mut temp_file = NamedTempFile::new().unwrap();
+        temp_file.write_all(toml_content.as_bytes()).unwrap();
+
+        #[cfg(unix)]
+        set_test_file_permissions_600(temp_file.path());
+
+        let result = Config::load(temp_file.path().to_str().unwrap());
+        assert!(result.is_err());
     }
 }

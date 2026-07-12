@@ -324,8 +324,15 @@ impl App {
         self.current_table = table_name.clone();
         let preview_cmd = build_preview_cmd(&pdir, table_name.as_deref());
         let prompt_str = t!(TuiMsg::QueryResultPrompt);
+        // プレビューペインの位置・サイズは設定でカスタマイズ可能にする
+        let preview_window = format!(
+            "{}:{}%:wrap",
+            self.settings.layout.result_preview_position.as_str(),
+            self.settings.layout.result_preview_width
+        );
 
-        let options = build_result_skim_options(&header_line, &preview_cmd, &prompt_str)?;
+        let options =
+            build_result_skim_options(&header_line, &preview_cmd, &prompt_str, &preview_window)?;
 
         let (tx, rx): (SkimItemSender, SkimItemReceiver) = unbounded();
         for item in items {
@@ -611,8 +618,15 @@ impl App {
         self.current_table = table_name.clone();
         let preview_cmd = build_preview_cmd(&pdir, table_name.as_deref());
         let prompt_str = t!(TuiMsg::QueryResultPrompt);
+        // プレビューペインの位置・サイズは設定でカスタマイズ可能にする
+        let preview_window = format!(
+            "{}:{}%:wrap",
+            self.settings.layout.result_preview_position.as_str(),
+            self.settings.layout.result_preview_width
+        );
 
-        let options = build_result_skim_options(&header_line, &preview_cmd, &prompt_str)?;
+        let options =
+            build_result_skim_options(&header_line, &preview_cmd, &prompt_str, &preview_window)?;
 
         // サンプリング完了後・skim起動直前にTUIを離脱することでちらつきを防ぐ
         // LeaveAlternateScreen を skim 起動直前まで遅延させることで素のターミナルが見える時間をゼロにする

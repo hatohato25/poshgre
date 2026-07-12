@@ -12,6 +12,14 @@
 # claude_model = "claude-sonnet-4-6"  # Claude model to use (default: claude-3-5-haiku-20241022)
 #                                     # Can also be set via CLAUDE_MODEL environment variable
 
+# [settings.layout]
+# sql_input_height = 5      # Height (in rows) of the SQL input area (default: 5)
+# shell_input_height = 5    # Height (in rows) of the Shell input area (default: 5)
+# prompt_input_height = 5   # Height (in rows) of the AI Prompt input area (default: 5)
+#                            # Ignored when anthropic_api_key is not set
+# result_preview_width = 30 # Size (%) of the preview pane in the result viewer (default: 30)
+# result_preview_position = "right"  # Position of the preview pane: "up", "down", "left", or "right" (default: "right")
+
 # ---------------------------------------------------------------------------
 # Direct connection (no bastion required)
 # ---------------------------------------------------------------------------
