@@ -323,6 +323,8 @@ pub(super) fn build_result_skim_options<'a>(
         .preview(Some(preview_cmd))
         .preview_window(Some(preview_window))
         .no_mouse(true)
+        // 結果リストのカラム見切れ対策として矢印キーを横スクロールに割り当てる（フィルタ入力のカーソル移動より優先）
+        .bind(vec!["left:scroll-left", "right:scroll-right"])
         .build()
         .map_err(|e| crate::error::Error::Other(format!("{}: {:?}", t!(TuiMsg::SkimInitError), e)))
 }
