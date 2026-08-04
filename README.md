@@ -1,5 +1,7 @@
 # poshgre
 
+**English** | [日本語](README.ja.md)
+
 A TUI PostgreSQL client for fast database exploration with fuzzy search, written in Rust.
 
 ![demo](https://github.com/hatohato25/poshgre/releases/download/v0.1.0/t-rec.gif)
