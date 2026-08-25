@@ -121,17 +121,33 @@ jobs:
             echo "RELEASE_NOTES_EOF"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Update Cargo.toml version
+      - name: Update version references
         run: |
           NEXT_TAG="${{ steps.version.outputs.next_tag }}"
           VERSION="${NEXT_TAG#v}"
+          DOCS_HTML="docs/index.html"
+
           sed -i "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
+
+          # docs/index.html のトップバー表示バージョンを置換する。
+          # 実体は <script type="__bundler/template"> 内の JSON 文字列なので、
+          # バージョン番号だけを差し替えて JSON 構造には手を入れない
+          if ! grep -qE '<span>v[0-9]+\.[0-9]+\.[0-9]+ ' "$DOCS_HTML"; then
+            echo "::error::${DOCS_HTML} にバージョン表記 (<span>vX.Y.Z ...) が見つかりません"
+            exit 1
+          fi
+          sed -i -E "s|<span>v[0-9]+\.[0-9]+\.[0-9]+ |<span>v${VERSION} |g" "$DOCS_HTML"
+          if ! grep -q "<span>v${VERSION} " "$DOCS_HTML"; then
+            echo "::error::${DOCS_HTML} のバージョン置換に失敗しました"
+            exit 1
+          fi
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Cargo.toml
+          git add Cargo.toml "$DOCS_HTML"
           # 変更がない場合はコミットをスキップ
           if git diff --cached --quiet; then
-            echo "Cargo.toml already at version ${VERSION}, skipping commit"
+            echo "Cargo.toml / ${DOCS_HTML} are already at version ${VERSION}, skipping commit"
           else
             git commit -m "chore: bump version to ${VERSION}"
             git push origin HEAD
